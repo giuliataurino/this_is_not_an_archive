@@ -398,7 +398,8 @@
     background: transparent; border: none; border-bottom: 1px solid var(--border);
     padding: 6px 0; border-radius: 0; min-width: 0;
   }
-  .key-panel input { flex: 1 1 220px; }
+  .key-panel select { flex: 1 1 260px; }
+  .key-panel input { flex: 1 1 260px; }
   .key-panel button, .search-row button {
     background: none; border: none; cursor: pointer; min-height: 40px;
     font-family: var(--sans); font-size: 12px; text-transform: uppercase;
@@ -530,20 +531,13 @@
   <!-- Top bar -->
   <div class="topbar">
     <a class="topbar-left" id="topbar-title" href="#" onclick="returnToStart(); return false;">The Met</a>
-    <span class="topbar-right"><span id="topbar-right"></span><button class="key-btn" id="key-btn" type="button">Key</button></span>
+    <span class="topbar-right"><span id="topbar-right"></span><button class="key-btn" id="key-btn" type="button">Model</button></span>
   </div>
 
   <!-- Model key panel -->
   <form class="key-panel" id="key-panel">
-    <select id="provider-input" aria-label="Model provider">
-      <option value="secure">Open model (secure)</option>
-      <option value="openrouter">OpenRouter</option>
-      <option value="huggingface">Hugging Face</option>
-      <option value="pollinations">Pollinations</option>
-    </select>
-    <input id="key-input" type="password" placeholder="API key" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="API key">
-    <input id="model-input" list="model-list" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Model">
-    <datalist id="model-list"></datalist>
+    <select id="model-input" aria-label="Free model"></select>
+    <input id="key-input" type="password" placeholder="OpenRouter key (optional, this device only)" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="OpenRouter key">
     <button type="submit">Save</button>
     <span class="note" id="key-note"></span>
   </form>
@@ -621,24 +615,28 @@
 
 <script>
 /* ─────────────────────────────────────────────────────────────
-   Configuration — open-weight vision models only (Llama, Qwen, Gemma)
-   reached through three providers that speak the OpenAI chat format.
-   Each visitor can add their own free key under "Key". To give every
-   visitor a working default, paste a key into SITE_KEYS — but note that
-   on a public GitHub Pages site it is readable in the page source.
+   Configuration — negations are written only by FREE OpenRouter models
+   (model IDs ending in ":free"), reached through your Cloudflare Worker
+   (proxy/llm-worker.js). The OpenRouter key is a secret inside the Worker;
+   this page holds no key and cannot call any paid model.
    ───────────────────────────────────────────────────────────── */
-const SITE_KEYS = {
-  openrouter: "",      // sk-or-...   from openrouter.ai/keys
-  huggingface: "",     // hf_...      from huggingface.co/settings/tokens (fine-grained, "Inference Providers" permission)
-  pollinations: ""     // pk_...      publishable key from enter.pollinations.ai (made for browser use)
-};
-/* The default model is an open model reached through your own Cloudflare Worker
-   (proxy/llm-worker.js, see SETUP.md). The provider's API key is stored as the secret
-   "LLM-API-Key" inside the Worker, never in this file, so nothing secret is on GitHub.
-   The Worker's address: */
 const PROXY_URL = "https://not-an-archive.g-taurino.workers.dev/";
 
-const DEFAULT_PROVIDER = "secure";   // the open model behind the secure proxy is always the starting model
+/* Direct use: if an OpenRouter key is entered under "Model", this browser calls
+   OpenRouter itself with that key (free models only). The key is kept in this
+   device's browser storage, never in this file, so it is not published on GitHub. */
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const directKey = () => (localStorage.getItem("cnpa:openrouter-key") || "").trim();
+
+// free vision models, in order of preference (the Worker's own list replaces this when it answers)
+const FREE_MODELS = [
+  "meta-llama/llama-4-maverick:free",
+  "qwen/qwen2.5-vl-72b-instruct:free",
+  "google/gemma-3-27b-it:free",
+  "meta-llama/llama-4-scout:free",
+  "openrouter/free"
+];
+const isFree = id => /:free$/.test(id) || id === "openrouter/free";
 
 const MET = "https://collectionapi.metmuseum.org/public/collection/v1";
 // /v1/search was retired by the Met on 1 October 2026 (it now answers 410);
@@ -649,87 +647,34 @@ const MAX_OFFSET = 10000;     // offset + limit may not exceed 10,000
 const TARGET_IMAGES = 200;    // paintings with viewable images to show per search
 
 const imageObj = url => ({ type: "image_url", image_url: { url } });
-const PROVIDERS = {
-  secure: {
-    name: "Open model",
-    endpoint: PROXY_URL,
-    keyless: true,      // the key lives in the Worker
-    defaultModel: "meta-llama/llama-4-maverick:free",   // replaced by the Worker's own default when it answers
-    models: ["meta-llama/llama-4-maverick:free"],
-    keyHelp: "",
-    headers: () => ({})
-  },
-  openrouter: {
-    name: "OpenRouter",
-    endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    defaultModel: "meta-llama/llama-4-maverick",
-    models: ["meta-llama/llama-4-maverick", "meta-llama/llama-4-maverick:free", "meta-llama/llama-4-scout",
-             "qwen/qwen3-vl-235b-a22b-instruct", "qwen/qwen3-vl-32b-instruct", "qwen/qwen2.5-vl-72b-instruct:free",
-             "google/gemma-3-27b-it", "google/gemma-3-27b-it:free"],
-    keyHelp: "openrouter.ai/keys (models ending in :free cost nothing)",
-    headers: () => ({ "HTTP-Referer": location.origin && location.origin !== "null" ? location.origin : "https://github.com", "X-Title": "This Is Not an Archive" })
-  },
-  huggingface: {
-    name: "Hugging Face",
-    endpoint: "https://router.huggingface.co/v1/chat/completions",
-    defaultModel: "Qwen/Qwen2.5-VL-72B-Instruct",
-    models: ["Qwen/Qwen2.5-VL-72B-Instruct", "Qwen/Qwen2.5-VL-7B-Instruct", "meta-llama/Llama-4-Maverick-17B-128E-Instruct",
-             "meta-llama/Llama-4-Scout-17B-16E-Instruct", "google/gemma-3-27b-it"],
-    keyHelp: "huggingface.co/settings/tokens (free account includes monthly credit)",
-    headers: () => ({})
-  },
-  pollinations: {
-    name: "Pollinations",
-    endpoint: "https://gen.pollinations.ai/v1/chat/completions",
-    modelsURL: "https://gen.pollinations.ai/v1/models",   // listed live, no key needed
-    defaultModel: "",
-    models: [],
-    keyHelp: "enter.pollinations.ai (use a publishable pk_ key)",
-    headers: () => ({})
-  }
-};
-const OPEN_FAMILY = /llama|qwen|gemma|deepseek|phi|olmo|glm|kimi|intern/i;
 
 const settings = {
-  // only a choice made in this version's Key panel overrides the default; older saved choices are ignored
-  provider: PROVIDERS[localStorage.getItem("cnpa:provider:v3")] ? localStorage.getItem("cnpa:provider:v3") : DEFAULT_PROVIDER,
-  get p() { return PROVIDERS[this.provider]; },
-  get key() { return localStorage.getItem("cnpa:key:" + this.provider) || SITE_KEYS[this.provider] || ""; },
-  get model() { return localStorage.getItem("cnpa:model:" + this.provider) || this.p.defaultModel; }
+  models: FREE_MODELS.slice(),
+  name: "OpenRouter (free models)",
+  get model() {
+    const saved = localStorage.getItem("cnpa:model:free");
+    return saved && this.models.includes(saved) ? saved : this.models[0];
+  }
 };
-// Ask the Worker which open models it offers, so the page and the Worker always agree
+
+// Ask the Worker which free models it offers, so the page and the Worker always agree
 let proxyInfo = null;
 async function loadProxyInfo() {
   if (!PROXY_URL || proxyInfo) return proxyInfo;
   try {
     const j = await (await fetch(PROXY_URL)).json();
     proxyInfo = j;
-    const P = PROVIDERS.secure;
-    if (Array.isArray(j.models) && j.models.length) P.models = j.models;
-    if (j.default_model) P.defaultModel = j.default_model;
-    if (j.provider) P.name = `Open model via ${j.provider}`;
-    const saved = localStorage.getItem("cnpa:model:secure");
-    if (saved && P.models.length && !P.models.includes(saved)) localStorage.removeItem("cnpa:model:secure");
+    const free = (Array.isArray(j.models) ? j.models : []).filter(isFree);
+    if (free.length) settings.models = free;
   } catch {}
   return proxyInfo;
 }
 
-const needsKey = () => settings.p.keyless ? !settings.p.endpoint : (!settings.key || !settings.model);
+const needsKey = () => !PROXY_URL && !directKey();
 
-// remove anything left on this device from the earlier Mistral setup
-["cnpa:key", "cnpa:model", "cnpa:key:mistral", "cnpa:model:mistral", "cnpa:provider", "cnpa:provider:v2", "cnpa:model:claude"].forEach(k => localStorage.removeItem(k));
-
-// Pollinations: discover which open models are live right now
-async function loadPollinationsModels() {
-  const P = PROVIDERS.pollinations;
-  if (P.models.length) return;
-  try {
-    const j = await (await fetch(P.modelsURL)).json();
-    const ids = (j.data || j || []).map(m => (typeof m === "string" ? m : m.id)).filter(Boolean);
-    P.models = ids.filter(id => OPEN_FAMILY.test(id));
-    P.defaultModel = P.models.find(id => /vl|vision|llama-4|gemma-3|maverick|scout/i.test(id)) || P.models[0] || "";
-  } catch {}
-}
+// clear choices saved by earlier versions (other providers, keys, paid models)
+Object.keys(localStorage).filter(k => /^cnpa:(key|provider|model)(:|$)/.test(k) && k !== "cnpa:model:free")
+  .forEach(k => localStorage.removeItem(k));
 
 /* ─────────────────────────────────────────────────────────────
    The original record: Moonlight, Strandgade 30 (written by hand)
@@ -857,9 +802,7 @@ function renderNegative() {
     const st = genState[current.id];
     let html;
     if (st === "pending") html = `<p class="gen-note pulse">Unsaying the record\u2026</p>`;
-    else if (needsKey()) html = settings.p.keyless
-      ? `<p class="gen-note">The secure model isn\u2019t connected to this site yet.<button type="button" onclick="openKey()">Choose another model</button></p>`
-      : `<p class="gen-note">To unsay this record, add an API key for ${esc(settings.p.name)}.<button type="button" onclick="openKey()">Add key</button></p>`;
+    else if (needsKey()) html = `<p class="gen-note">To unsay this record, add an OpenRouter key under Model.<button type="button" onclick="openKey()">Add key</button></p>`;
     else html = `<p class="gen-note">${st ? esc(st) : "This record has not been unsaid yet."}<button type="button" onclick="generate(true)">Unsay this record</button></p>`;
     negPanel.innerHTML = html;
     absPanel.appendChild(heading);
@@ -1232,14 +1175,21 @@ Return the JSON object now.`;
 
 let lastModelUsed = "";
 async function callModel(messages) {
-  const P = settings.p;
+  const P = { name: "The free model" };
+  const key = directKey();
   const headers = { "Content-Type": "application/json" };
-  if (settings.key && !P.keyless) headers.Authorization = "Bearer " + settings.key;
-  Object.assign(headers, P.headers());
-  const body = { model: settings.model, messages, temperature: 0.9, max_tokens: 2500 };
+  const model = isFree(settings.model) ? settings.model : FREE_MODELS[0];
+  const body = { model, messages, temperature: 0.9, max_tokens: 2500 };
+  if (key) {
+    // straight to OpenRouter with this device's key; free models only, with free fallbacks
+    headers.Authorization = "Bearer " + key;
+    headers["HTTP-Referer"] = location.origin && location.origin !== "null" ? location.origin : "https://github.com";
+    headers["X-Title"] = "This Is Not an Archive";
+    body.models = [model, ...settings.models.filter(m => m !== model && isFree(m))].slice(0, 3);
+  }
   let res;
   try {
-    res = await fetch(P.endpoint, { method: "POST", headers, body: JSON.stringify(body) });
+    res = await fetch(key ? OPENROUTER_URL : PROXY_URL, { method: "POST", headers, body: JSON.stringify(body) });
   } catch {
     const e = new Error(`${P.name} could not be reached from this browser.`); e.fatal = true; throw e;
   }
@@ -1247,10 +1197,10 @@ async function callModel(messages) {
     let detail = "";
     try { const j = await res.json(); detail = j?.error?.message || j?.message || ""; } catch {}
     const e = new Error(
-      res.status === 401 ? `${P.name} rejected the key. Check it under Key.` :
+      res.status === 401 ? (directKey() ? "OpenRouter rejected the key entered under Model. Check it, or clear it to use the site\u2019s proxy." : "The site\u2019s OpenRouter key was rejected. The site owner needs to check Openrouter_Key in the Worker.") :
       res.status === 402 ? `${P.name} reports no credit left on this key.` :
-      res.status === 429 ? `${P.name}\u2019s rate limit was reached. Wait a moment, then unsay again.` :
-      res.status === 404 ? `${P.name} doesn\u2019t offer the model \u201c${settings.model}\u201d. Choose another under Key.` :
+      res.status === 429 ? (detail || "The free models are busy or today\u2019s free requests are used up. Try again later.") :
+      res.status === 404 ? `The free model \u201c${settings.model}\u201d isn\u2019t available right now. Choose another under Model.` :
       `${P.name} answered with status ${res.status}.${detail ? " " + String(detail).slice(0, 320) : ""}`);
     e.fatal = [401, 402, 404, 429].includes(res.status);
     throw e;
@@ -1316,41 +1266,27 @@ async function generate(force) {
 /* ─────────────────────────────────────────────────────────────
    Key panel, search form, start-up
    ───────────────────────────────────────────────────────────── */
-function fillKeyPanel(provider) {
-  const P = PROVIDERS[provider];
-  $("key-input").style.display = P.keyless ? "none" : "";
-  $("key-input").value = localStorage.getItem("cnpa:key:" + provider) || SITE_KEYS[provider] || "";
-  $("key-input").placeholder = `${P.name} API key`;
-  $("model-input").value = localStorage.getItem("cnpa:model:" + provider) || P.defaultModel;
-  $("model-list").innerHTML = P.models.map(m => `<option value="${esc(m)}">`).join("");
-  $("key-note").innerHTML = P.keyless
-    ? (P.endpoint ? "This open model runs through the site\u2019s secure proxy. No key is needed here, and none is stored in this page."
-                  : "The secure model isn\u2019t connected yet: the site owner sets PROXY_URL in the page after deploying the proxy.")
-    : `Get a key at ${esc(P.keyHelp)}. It is kept in this browser only and sent only to ${esc(P.name)}. Use a model that accepts images.`;
+function fillModelPanel() {
+  $("model-input").innerHTML = settings.models.map(m =>
+    `<option value="${esc(m)}"${m === settings.model ? " selected" : ""}>${esc(m === "openrouter/free" ? "Any free vision model (OpenRouter picks)" : m.replace(/:free$/, ""))}</option>`).join("");
+  $("key-input").value = directKey();
+  $("key-note").innerHTML = "Only free OpenRouter models are used, so nothing is ever charged. " +
+    (PROXY_URL ? "Leave the key empty to use this site\u2019s secure proxy. " : "") +
+    "A key entered here is used directly by this browser and kept only on this device; it is never written into the page or GitHub. If the chosen model is busy, the next free one answers.";
 }
-async function openKeyAfterInfo() { await loadProxyInfo(); if ($("key-panel").classList.contains("open") && $("provider-input").value === "secure") fillKeyPanel("secure"); }
-function openKey() {
-  openKeyAfterInfo();
+async function openKey() {
   $("key-panel").classList.add("open");
-  $("provider-input").value = settings.provider;
-  fillKeyPanel(settings.provider);
-  if (settings.provider === "pollinations") loadPollinationsModels().then(() => fillKeyPanel("pollinations"));
-  $("key-input").focus();
+  fillModelPanel();
+  await loadProxyInfo();
+  if ($("key-panel").classList.contains("open")) fillModelPanel();
 }
-$("provider-input").onchange = async e => {
-  const v = e.target.value;
-  fillKeyPanel(v);
-  if (v === "pollinations") { await loadPollinationsModels(); if ($("provider-input").value === v) fillKeyPanel(v); }
-};
 $("key-btn").onclick = () => $("key-panel").classList.contains("open") ? $("key-panel").classList.remove("open") : openKey();
 $("key-panel").onsubmit = e => {
   e.preventDefault();
-  const provider = $("provider-input").value;
-  localStorage.setItem("cnpa:provider:v3", provider);
-  if (!PROVIDERS[provider].keyless) localStorage.setItem("cnpa:key:" + provider, $("key-input").value.trim());
-  const model = $("model-input").value.trim() || PROVIDERS[provider].defaultModel;
-  if (model) localStorage.setItem("cnpa:model:" + provider, model);
-  settings.provider = provider;
+  const model = $("model-input").value;
+  if (isFree(model)) localStorage.setItem("cnpa:model:free", model);
+  const key = $("key-input").value.trim();
+  if (key) localStorage.setItem("cnpa:openrouter-key", key); else localStorage.removeItem("cnpa:openrouter-key");
   $("key-panel").classList.remove("open");
   delete genState[current.id];
   generate(false);
