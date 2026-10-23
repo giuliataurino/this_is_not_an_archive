@@ -536,7 +536,7 @@
   <!-- Model key panel -->
   <form class="key-panel" id="key-panel">
     <select id="provider-input" aria-label="Model provider">
-      <option value="claude">Claude (secure)</option>
+      <option value="secure">Open model (secure)</option>
       <option value="openrouter">OpenRouter</option>
       <option value="huggingface">Hugging Face</option>
       <option value="pollinations">Pollinations</option>
@@ -632,12 +632,13 @@ const SITE_KEYS = {
   huggingface: "",     // hf_...      from huggingface.co/settings/tokens (fine-grained, "Inference Providers" permission)
   pollinations: ""     // pk_...      publishable key from enter.pollinations.ai (made for browser use)
 };
-/* Claude runs through your own Cloudflare Worker (see proxy/claude-worker.js and SETUP.md).
-   The Anthropic API key is stored as a secret inside the Worker, never in this file,
-   so nothing secret is published on GitHub. Paste the Worker's address here: */
-const CLAUDE_PROXY_URL = "https://not-an-archive.g-taurino.workers.dev";   // e.g. "https://not-an-archive-claude.yourname.workers.dev"
+/* The default model is an open model reached through your own Cloudflare Worker
+   (proxy/llm-worker.js, see SETUP.md). The provider's API key is stored as the secret
+   "LLM-API-Key" inside the Worker, never in this file, so nothing secret is on GitHub.
+   The Worker's address: */
+const PROXY_URL = "https://not-an-archive.g-taurino.workers.dev/";
 
-const DEFAULT_PROVIDER = "claude";   // Claude, through the secure proxy, is always the starting model
+const DEFAULT_PROVIDER = "secure";   // the open model behind the secure proxy is always the starting model
 
 const MET = "https://collectionapi.metmuseum.org/public/collection/v1";
 // /v1/search was retired by the Met on 1 October 2026 (it now answers 410);
@@ -649,12 +650,12 @@ const TARGET_IMAGES = 200;    // paintings with viewable images to show per sear
 
 const imageObj = url => ({ type: "image_url", image_url: { url } });
 const PROVIDERS = {
-  claude: {
-    name: "Claude",
-    endpoint: CLAUDE_PROXY_URL,
+  secure: {
+    name: "Open model",
+    endpoint: PROXY_URL,
     keyless: true,      // the key lives in the Worker
-    defaultModel: "claude-sonnet-5-5",
-    models: ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5"],
+    defaultModel: "meta-llama/llama-4-maverick:free",   // replaced by the Worker's own default when it answers
+    models: ["meta-llama/llama-4-maverick:free"],
     keyHelp: "",
     headers: () => ({})
   },
@@ -690,16 +691,33 @@ const PROVIDERS = {
 const OPEN_FAMILY = /llama|qwen|gemma|deepseek|phi|olmo|glm|kimi|intern/i;
 
 const settings = {
-  // only a choice made in this version's Key panel overrides Claude; older saved choices are ignored
-  provider: PROVIDERS[localStorage.getItem("cnpa:provider:v2")] ? localStorage.getItem("cnpa:provider:v2") : DEFAULT_PROVIDER,
+  // only a choice made in this version's Key panel overrides the default; older saved choices are ignored
+  provider: PROVIDERS[localStorage.getItem("cnpa:provider:v3")] ? localStorage.getItem("cnpa:provider:v3") : DEFAULT_PROVIDER,
   get p() { return PROVIDERS[this.provider]; },
   get key() { return localStorage.getItem("cnpa:key:" + this.provider) || SITE_KEYS[this.provider] || ""; },
   get model() { return localStorage.getItem("cnpa:model:" + this.provider) || this.p.defaultModel; }
 };
+// Ask the Worker which open models it offers, so the page and the Worker always agree
+let proxyInfo = null;
+async function loadProxyInfo() {
+  if (!PROXY_URL || proxyInfo) return proxyInfo;
+  try {
+    const j = await (await fetch(PROXY_URL)).json();
+    proxyInfo = j;
+    const P = PROVIDERS.secure;
+    if (Array.isArray(j.models) && j.models.length) P.models = j.models;
+    if (j.default_model) P.defaultModel = j.default_model;
+    if (j.provider) P.name = `Open model via ${j.provider}`;
+    const saved = localStorage.getItem("cnpa:model:secure");
+    if (saved && P.models.length && !P.models.includes(saved)) localStorage.removeItem("cnpa:model:secure");
+  } catch {}
+  return proxyInfo;
+}
+
 const needsKey = () => settings.p.keyless ? !settings.p.endpoint : (!settings.key || !settings.model);
 
 // remove anything left on this device from the earlier Mistral setup
-["cnpa:key", "cnpa:model", "cnpa:key:mistral", "cnpa:model:mistral", "cnpa:provider"].forEach(k => localStorage.removeItem(k));
+["cnpa:key", "cnpa:model", "cnpa:key:mistral", "cnpa:model:mistral", "cnpa:provider", "cnpa:provider:v2", "cnpa:model:claude"].forEach(k => localStorage.removeItem(k));
 
 // Pollinations: discover which open models are live right now
 async function loadPollinationsModels() {
@@ -840,7 +858,7 @@ function renderNegative() {
     let html;
     if (st === "pending") html = `<p class="gen-note pulse">Unsaying the record\u2026</p>`;
     else if (needsKey()) html = settings.p.keyless
-      ? `<p class="gen-note">Claude isn\u2019t connected to this site yet.<button type="button" onclick="openKey()">Choose another model</button></p>`
+      ? `<p class="gen-note">The secure model isn\u2019t connected to this site yet.<button type="button" onclick="openKey()">Choose another model</button></p>`
       : `<p class="gen-note">To unsay this record, add an API key for ${esc(settings.p.name)}.<button type="button" onclick="openKey()">Add key</button></p>`;
     else html = `<p class="gen-note">${st ? esc(st) : "This record has not been unsaid yet."}<button type="button" onclick="generate(true)">Unsay this record</button></p>`;
     negPanel.innerHTML = html;
@@ -1212,6 +1230,7 @@ ${imageNote}
 Return the JSON object now.`;
 }
 
+let lastModelUsed = "";
 async function callModel(messages) {
   const P = settings.p;
   const headers = { "Content-Type": "application/json" };
@@ -1237,6 +1256,7 @@ async function callModel(messages) {
     throw e;
   }
   const j = await res.json();
+  lastModelUsed = j.model || settings.model;
   let text = j.choices?.[0]?.message?.content || "";
   if (Array.isArray(text)) text = text.map(c => c.text || "").join("");
   text = String(text).replace(/```json|```/g, "").trim();
@@ -1246,6 +1266,7 @@ async function callModel(messages) {
 }
 
 async function generate(force) {
+  await loadProxyInfo();
   const r = current;
   if (r.id === SEED.id && !force) return;          // the hand-written record
   if (!force && cachedNeg(r.id)) return;           // already unsaid on this device
@@ -1283,7 +1304,7 @@ async function generate(force) {
     overlay: raw.overlay || "Ceci n\u2019est pas une archive.",
     negations: r.standard.map(([label]) => [label, String(map[label.toLowerCase()] || "Not given. Not withheld either.")]),
     absences: (raw.absences || []).map(String).filter(Boolean).slice(0, 12),
-    model: settings.model,
+    model: lastModelUsed || settings.model,
     query: lastQuery,
     imageSeen
   };
@@ -1303,11 +1324,13 @@ function fillKeyPanel(provider) {
   $("model-input").value = localStorage.getItem("cnpa:model:" + provider) || P.defaultModel;
   $("model-list").innerHTML = P.models.map(m => `<option value="${esc(m)}">`).join("");
   $("key-note").innerHTML = P.keyless
-    ? (P.endpoint ? "Claude runs through this site\u2019s secure proxy. No key is needed here, and none is stored in this page."
-                  : "Claude isn\u2019t connected yet: the site owner sets CLAUDE_PROXY_URL in the page after deploying the proxy.")
+    ? (P.endpoint ? "This open model runs through the site\u2019s secure proxy. No key is needed here, and none is stored in this page."
+                  : "The secure model isn\u2019t connected yet: the site owner sets PROXY_URL in the page after deploying the proxy.")
     : `Get a key at ${esc(P.keyHelp)}. It is kept in this browser only and sent only to ${esc(P.name)}. Use a model that accepts images.`;
 }
+async function openKeyAfterInfo() { await loadProxyInfo(); if ($("key-panel").classList.contains("open") && $("provider-input").value === "secure") fillKeyPanel("secure"); }
 function openKey() {
+  openKeyAfterInfo();
   $("key-panel").classList.add("open");
   $("provider-input").value = settings.provider;
   fillKeyPanel(settings.provider);
@@ -1323,7 +1346,7 @@ $("key-btn").onclick = () => $("key-panel").classList.contains("open") ? $("key-
 $("key-panel").onsubmit = e => {
   e.preventDefault();
   const provider = $("provider-input").value;
-  localStorage.setItem("cnpa:provider:v2", provider);
+  localStorage.setItem("cnpa:provider:v3", provider);
   if (!PROVIDERS[provider].keyless) localStorage.setItem("cnpa:key:" + provider, $("key-input").value.trim());
   const model = $("model-input").value.trim() || PROVIDERS[provider].defaultModel;
   if (model) localStorage.setItem("cnpa:model:" + provider, model);
@@ -1342,6 +1365,7 @@ $("search-form").onsubmit = e => {
 
 // Start with the original record; a link with #q=keywords opens that search instead
 renderRecord();
+loadProxyInfo();
 (async () => {
   const h = new URLSearchParams(location.hash.slice(1));
   const startQ = h.get("q"), startId = Number(h.get("id"));
