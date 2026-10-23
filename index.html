@@ -531,7 +531,7 @@
   <!-- Top bar -->
   <div class="topbar">
     <a class="topbar-left" id="topbar-title" href="#" onclick="returnToStart(); return false;">The Met</a>
-    <span class="topbar-right"><span id="topbar-right"></span><button class="key-btn" id="key-btn" type="button">Model</button></span>
+    <span class="topbar-right"><span id="topbar-right"></span><button class="key-btn" id="key-btn" type="button" hidden>Model</button></span>
   </div>
 
   <!-- Model key panel -->
@@ -627,10 +627,11 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const directKey = () => "";   // keys are never asked for: every request goes through the Worker
 localStorage.removeItem("cnpa:openrouter-key");
 
-// free vision models, in order of preference (the Worker's own list replaces this when it answers)
+// The Worker uses ONE free model (its MODEL setting) for every record; this list is only
+// a fallback name for display until the Worker reports which model it uses.
 const FREE_MODELS = [
-  "meta-llama/llama-4-maverick:free",
-  "qwen/qwen2.5-vl-72b-instruct:free",
+  "qwen/qwen3-next-80b-a3b-instruct:free",
+  "meta-llama/llama-3.3-70b-instruct:free",
   "google/gemma-3-27b-it:free",
   "meta-llama/llama-4-scout:free",
   "openrouter/free"          // OpenRouter's own free picker: always last, always available
@@ -645,7 +646,6 @@ const PAGE_SIZE = 500;        // the Met caps limit at 500
 const MAX_OFFSET = 10000;     // offset + limit may not exceed 10,000
 const TARGET_IMAGES = 200;    // paintings with viewable images to show per search
 
-const imageObj = url => ({ type: "image_url", image_url: { url } });
 
 const settings = {
   models: FREE_MODELS.slice(),
@@ -829,6 +829,9 @@ function renderNegative() {
   });
 
   absPanel.appendChild(heading);
+  if (!neg.absences.length) {
+    absPanel.insertAdjacentHTML("beforeend", `<p class="gen-note">${esc(neg.absenceError || "What is absent hasn\u2019t been written for this record yet.")}<button type="button" onclick="generate(true)">Unsay again</button></p>`);
+  }
   neg.absences.forEach((text, i) => {
     const p = document.createElement("p");
     p.className = "absence-item";
@@ -838,7 +841,7 @@ function renderNegative() {
   });
 
   if (!neg.authored) {
-    const foot = `<div class="gen-foot"><span>Unsaid by ${esc(neg.model || "an open model")}${neg.query ? ` after a search for \u201c${esc(neg.query)}\u201d` : ""}${neg.imageSeen === false ? ", without the image" : ""}.</span><button type="button" onclick="generate(true)">Unsay again</button></div>`;
+    const foot = `<div class="gen-foot"><span>Unsaid by ${esc(neg.model || "an open model")}${neg.query ? ` after a search for \u201c${esc(neg.query)}\u201d` : ""}${neg.imageSeen === true ? ", with the image" : ""}.</span><button type="button" onclick="generate(true)">Unsay again</button></div>`;
     negPanel.insertAdjacentHTML("beforeend", foot);
     absPanel.insertAdjacentHTML("beforeend", foot);
   }
@@ -866,6 +869,7 @@ function switchTab(tabId) {
   $("topbar-title").textContent = isApophatic ? "This Is Not an Archive" : "The Met";
   $("topbar-right").textContent = isApophatic ? "Shadow Collection" : "";
   $("topbar-right").style.display = isApophatic ? "" : "none";
+  $("key-btn").hidden = true;   // one model, chosen in the Worker: nothing to pick here
   $("key-btn").style.borderLeft = isApophatic ? "" : "none";
   $("key-btn").style.paddingLeft = isApophatic ? "" : "0";
   $("bc-collection").textContent = isApophatic ? "The Shadow Collection" : "The Met Collection";
@@ -1145,57 +1149,35 @@ function select(rec) {
 /* ─────────────────────────────────────────────────────────────
    Open model: counterfactual unsaying
    ───────────────────────────────────────────────────────────── */
-function systemPrompt() {
-  return `You are the cataloguer of a counter-archive called "Ceci n\u2019est pas une archive". You receive one museum record from The Met (its catalogue fields and, when possible, its image) and you write two things about it: what the record is NOT, and what is ABSENT from the record. You are an instrument of unknowing, not knowing.
+/* Two separate prompts, sent as two requests:
+   1. NEGATION METADATA: metadata says "this"; negative metadata says "not that".
+   2. WHAT IS ABSENT: up to five sentences on what the metadata leaves out.            */
 
-TASK 1 \u2014 NEGATION METADATA: say what the record is not.
-For every field label you are given, write what this object and this field are NOT.
-- Every sentence must be a negation: it states what the object, its maker, its date, its medium, its size, its place or its history is not.
-- Start the sentences with "Not" (e.g. "Not daylight. Not noon. Not an address.").
-- Write four to eight short negations per field, and close most fields with one longer clause after an em dash that turns the chain against itself (e.g. "Not untitled\u2014though what it titles cannot be named.").
-- Stay with that field: the Medium field negates materials and techniques, the Date field negates times, the Dimensions field negates sizes and scales, the Credit Line negates ways of arriving in the museum, and so on.
-- Reason counterfactually and specifically: what this particular object could have been, given its real maker, material, period, place and image, and is not.
-- A fact from the record may appear only inside a negation (e.g. "Not French" for a Danish painter). Never state anything positively.
+const searchNote = () => lastQuery ? `Visitor searched: "${lastQuery}" (let one line be not what was sought).` : "";
+const metadataLines = r => r.standard.map(([k, v]) => `${k}: ${v}`).join("\n");
 
-TASK 2 \u2014 WHAT IS ABSENT: write sentences about what is absent from the metadata.
-Write eight to ten complete sentences, each naming something that this record does not and cannot contain: a field the catalogue was never designed to receive.
-- Each sentence must point to a specific gap in THESE fields: what the title, the date, the medium, the credit line, the department or the gallery leaves out about this object.
-- Think of: the sensory conditions of its making (light, temperature, sound, smell), the labour and the people around it who are never named, what the maker turned away from, the years between its making and its accession, its life in storage and in transit, the light of the gallery it hangs in now, and what the image cannot show.
-- Begin each sentence with "What", "Whether", "Which", "Who" or "That", or with a noun phrase naming the missing thing (e.g. "The temperature of the room on the night\u2026").
-- Speculate only in the grammar of not-knowing ("whether\u2026", "what\u2026"); never present an invented fact as true.
-
-FOR BOTH TASKS
-- The visitor reached this object by searching for certain keywords. Let at least one negation and one absence answer that search by not being what was sought.
-- Never explain the method, and never use the words "apophatic", "negation" or "metadata" in what you write.
-
-STYLE EXAMPLES from another record (learn the tone, never reuse them):
-Negation, Dimensions \u2192 "Not monumental. Not miniature. Not the size of the room it contains. Not the size of the silence it measures."
-Negation, Credit Line \u2192 "Not inherited. Not stolen. Not donated by the artist. Not found. Not claimed by the room it came from."
-Absence \u2192 "What Ida was doing in the next room."
-Absence \u2192 "The sound of Strandgade 30\u2014whether the floors creaked, whether the neighbors were audible, whether a clock was present and if so whether he stopped it before working."
-Absence \u2192 "That Gallery 813 has a particular quality of artificial light that is nothing like moonlight, and that the painting now lives permanently inside an illumination it was made to negate."
-
-OUTPUT: one JSON object only, with no text before or after it:
-{
- "breadcrumb": "the title negated in a few words, e.g. \\"Not Moonlight, Not Strandgade 30\\"",
- "caption": "one sentence that replaces the image caption by saying what the image is not",
- "overlay": "one line of at most 10 words to lay over the image",
- "negations": { "<each field label, exactly as given>": "the negations for that field (TASK 1)" },
- "absences": ["eight to ten sentences on what is absent from this record (TASK 2)"]
-}`;
+// Prompts are kept short on purpose: fewer tokens in, fewer tokens out, faster answers.
+function negationPrompt(r) {
+  const system = `Counter-archive "Ceci n\u2019est pas une archive".
+Metadata = THIS. Negative metadata = NOT THAT.
+For each field below, write what its value is NOT: 4\u20136 short sentences starting "Not", each something that value excludes (another date, material, size, maker, nationality, place, department, way of entering a museum). End most fields with one longer em-dash clause that turns against the chain. Never state anything positively. Be specific to this painting. Never write the words negation, metadata or apophatic.
+Example \u2014 Date: 1900\u20131906 \u2192 "Not 1899. Not 1907. Not a single year. Not dated with certainty\u2014six years of not finishing or not beginning."
+Reply with JSON only:
+{"breadcrumb":"title negated, few words","caption":"one sentence: what the image is not","overlay":"\u226410 words","negations":{"<field label>":"text"}}`;
+  const user = `${metadataLines(r)}
+${searchNote()}
+JSON keys for negations: ${JSON.stringify(r.standard.map(([k]) => k))}`;
+  return [system, user];
 }
 
-function userPrompt(r, imageNote) {
-  return `Record from The Metropolitan Museum of Art, object ${r.id}:
-${r.standard.map(([k, v]) => `${k}: ${v}`).join("\n")}
-${r.tags && r.tags.length ? `Subjects: ${r.tags.join(", ")}\n` : ""}
-The visitor searched for: "${lastQuery || "nothing in particular"}"
-Field labels, in order: ${JSON.stringify(r.standard.map(([k]) => k))}
-${imageNote}
-
-TASK 1: for each of those field labels, write what this record is not.
-TASK 2: write eight to ten sentences on what is absent from this record.
-Return the JSON object now.`;
+function absencePrompt(r) {
+  const system = `Counter-archive "Ceci n\u2019est pas une archive".
+From the painting's metadata below, write up to 5 sentences (never more) on what is ABSENT from it: what these fields leave out or were never designed to hold. Each sentence names one specific missing thing, tied where possible to a field (title, date, medium, credit line, gallery\u2026): conditions of its making, unnamed people and labour, what the painter turned away from, its years before the museum, storage, the gallery light now. Begin with What, Whether, Which, Who or That, or a noun phrase. Invent no facts; speculate only as "whether\u2026" or "what\u2026". Never write the words negation, metadata or apophatic.
+Example: "What Ida was doing in the next room."
+Reply with JSON only: {"absences":["\u2026"]}`;
+  const user = `${metadataLines(r)}
+${r.tags && r.tags.length ? `Subjects: ${r.tags.join(", ")}\n` : ""}${searchNote()}`;
+  return [system, user];
 }
 
 // Free models don't always return clean JSON: they wrap it in prose or code fences,
@@ -1261,18 +1243,22 @@ function negationMap(raw) {
 }
 
 let lastModelUsed = "";
-async function callModel(messages, avoid = new Set()) {
+let generateFresh = false;   // true while "Unsay again" asks for a new version
+async function callModel(messages, avoid = new Set(), part = "negation") {
   const key = directKey();
-  const pool = settings.models.filter(m => isFree(m) && !avoid.has(m));
+  const pool = settings.models.filter(m => isFree(m));
   const chosen = isFree(settings.model) && !avoid.has(settings.model) ? settings.model : (pool[0] || "openrouter/free");
   const chain = [chosen, ...pool.filter(m => m !== chosen)];
   let last = null, best = null;   // best: the fullest partial record seen, used if nothing complete arrives
   // the Worker does its own fallbacks; the direct route tries up to three groups of three free models
-  const groups = key ? [chain.slice(0, 3), chain.slice(3, 6), chain.slice(6, 9)].filter(g => g.length) : chain.slice(0, 3).map(m => [m]);
+  // the Worker always uses its one model: ask twice at most, in case the first answer is unreadable
+  // one request per attempt: every request counts toward the 50-a-day free limit
+  const groups = key ? [chain.slice(0, 3), chain.slice(3, 6), chain.slice(6, 9)].filter(g => g.length) : [[chosen]];
   if (key) groups.push(["openrouter/free"]);   // last resort: OpenRouter picks any free model that fits
   for (const group of groups) {
     const headers = { "Content-Type": "application/json" };
-    const body = { model: group[0], messages, temperature: 0.8, max_tokens: 4000 };
+    const body = { model: group[0], messages, temperature: 0.8, max_tokens: part === "absence" ? 600 : 1800,
+                   record_id: current.id, record_part: part, fresh: !!generateFresh };   // lets the Worker reuse a record it already wrote
     if (key) {
       headers.Authorization = "Bearer " + key;
       headers["HTTP-Referer"] = location.origin && location.origin !== "null" ? location.origin : "https://github.com";
@@ -1291,16 +1277,15 @@ async function callModel(messages, avoid = new Set()) {
       let text = j.choices?.[0]?.message?.content || "";
       if (Array.isArray(text)) text = text.map(c => c.text || "").join("");
       const record = readRecord(text);
-      if (record) {
+      if (record && (part === "negation" ? record.negations : record.absences)) {
         // complete enough? (most fields negated, and a real list of absences)
         const got = Object.keys(negationMap(record)).length;
         const abs = Array.isArray(record.absences) ? record.absences.length : record.absences ? 1 : 0;
-        const complete = got >= Math.ceil(current.standard.length * 0.6) && abs >= 4;
+        const complete = part === "negation" ? got >= Math.ceil(current.standard.length * 0.6) : abs >= 2;
         if (complete) { lastModelUsed = j.model || group[0]; return record; }
         if (!best || got + abs > best.score) best = { record, model: j.model || group[0], score: got + abs };
       }
-      // unreadable answer: remember this model and try the next free one
-      avoid.add(j.model || group[0]); avoid.add(group[0]);
+      // unreadable answer: ask again
       last = { status: 422, detail: "" };
       continue;
     }
@@ -1316,8 +1301,8 @@ async function callModel(messages, avoid = new Set()) {
   const e = new Error(
     st === 401 ? "The site\u2019s OpenRouter key was rejected. The site owner needs to check Openrouter_Key in the Worker." :
     st === 429 ? (detail || "The free models are busy or today\u2019s free requests are used up. Try again later.") :
-    st === 404 ? "No free vision model is available on OpenRouter right now. Try again later." :
-    st === 422 ? "The free models answered, but not in a form that could be read as a record. Unsay again, or choose another model under Model." :
+    st === 404 ? (detail || "The free model isn\u2019t available on OpenRouter right now. Try again later.") :
+    st === 422 ? "The model answered, but not in a form that could be read as a record. Unsay again." :
     (detail || `The free model answered with status ${st}.`));
   e.fatal = [401, 403, 404, 429].includes(st);
   throw e;
@@ -1332,25 +1317,34 @@ async function generate(force) {
   if (genState[r.id] === "pending") return;
 
   const token = ++genToken;
+  generateFresh = !!force;
   genState[r.id] = "pending";
   if (force) localStorage.removeItem("cnpa:neg:" + r.id);
   renderNegative();
 
-  const system = { role: "system", content: systemPrompt() };
-  const attempts = r.thumb ? ["image", "text"] : ["text"];
-  let raw = null, imageSeen = false, err = null;
-  const avoid = new Set();
-  for (const how of attempts) {
-    const content = how === "image"
-      ? [{ type: "text", text: userPrompt(r, "The image of the object is attached; look at it in order to write around and away from it.") },
-         imageObj(r.thumb)]
-      : userPrompt(r, "The image could not be shown to you; let the missing image be one more absence.");
-    try { raw = await callModel([system, { role: "user", content }], avoid); imageSeen = how === "image"; break; }
-    catch (e) { err = e; if (e.fatal) break; }
+  // one prompt per tab, text only: the model reads the metadata, never the image
+  async function ask(part) {
+    const build = part === "negation" ? negationPrompt : absencePrompt;
+    const [system, userText] = build(r);
+    const out = await callModel([{ role: "system", content: system }, { role: "user", content: userText }], new Set(), part);
+    return { out, imageSeen: false, model: lastModelUsed };
   }
 
+  let negPart = null, absPart = null, err = null;
+  try { negPart = await ask("negation"); } catch (e) { err = e; }
+  if (negPart) { try { absPart = await ask("absence"); } catch (e) { err = e; } }
+  const raw = negPart ? { ...negPart.out, absences: absPart ? absPart.out.absences : [] } : null;
+  const imageSeen = negPart ? negPart.imageSeen : false;
+  lastModelUsed = negPart ? negPart.model : lastModelUsed;
+  const absenceError = negPart && !absPart && err ? err.message : "";
+
   if (!raw) {
-    genState[r.id] = err ? err.message : "The record could not be unsaid.";
+    let msg = err ? err.message : "The record could not be unsaid.";
+    if (/midnight UTC/.test(msg)) {
+      const reset = new Date(); reset.setUTCHours(24, 0, 0, 0);
+      msg += ` That is ${reset.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} your time.`;
+    }
+    genState[r.id] = msg;
     if (current.id === r.id) renderNegative();
     return;
   }
@@ -1363,10 +1357,11 @@ async function generate(force) {
     negations: r.standard.map(([label]) => [label, String(map[label.toLowerCase()] || "Not given. Not withheld either.")]),
     absences: (Array.isArray(raw.absences) ? raw.absences : typeof raw.absences === "string" ? raw.absences.split(/\n+/) : [])
       .map(a => String(typeof a === "object" && a ? (a.text || a.absence || Object.values(a)[0] || "") : a).replace(/^\s*[-\u2022\d.]+\s*/, "").trim())
-      .filter(Boolean).slice(0, 12),
+      .filter(Boolean).slice(0, 5),   // What Is Absent: at most five sentences
     model: lastModelUsed || settings.model,
     query: lastQuery,
-    imageSeen
+    imageSeen,
+    absenceError
   };
   storeNeg(r.id, neg);
   delete genState[r.id];
