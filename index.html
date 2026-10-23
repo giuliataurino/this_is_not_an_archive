@@ -509,8 +509,12 @@
     border-left: 1px solid var(--border); padding-left: 16px;
   }
 
-  /* Credit, always visible at the bottom */
+  /* Credit at the end of the page (in the page flow, so it never covers the record) */
   .bottom-bar {
+    position: static;
+    margin-top: 40px;
+    pointer-events: auto;
+    background: none;
     display: flex; flex-direction: column; align-items: center; gap: 3px;
     padding: 28px 24px calc(14px + env(safe-area-inset-bottom));
     background: linear-gradient(to top, var(--bg) 55%, transparent);
@@ -522,7 +526,7 @@
   .bottom-bar .credit-line { font-family: var(--serif); font-size: 13px; letter-spacing: 0; text-transform: none; }
   body.apophatic .bottom-bar { color: #555; }
   body.apophatic .bottom-bar .credit-title { color: #777; }
-  body { padding-bottom: 110px; }
+  body { padding-bottom: 0; }
   body.apophatic .artwork-date { margin-top: 18px; }
 </style>
 </head>
@@ -768,15 +772,41 @@ function storeNeg(id, neg) {
 /* ─────────────────────────────────────────────────────────────
    Rendering
    ───────────────────────────────────────────────────────────── */
+// Show a record's image, moving to the next address if one fails to load
+function imageCandidates(r) {
+  return [...new Set([r.image, ...(r.imageFallbacks || []), r.thumb].filter(Boolean))];
+}
+function showImage(r) {
+  const img = $("painting");
+  const list = imageCandidates(r);
+  let i = 0;
+  img.classList.remove("loaded");
+  img.alt = r.title + (r.artist ? " by " + r.artist : "");
+  img.onload = () => { if (current === r) img.classList.add("loaded"); };
+  let askedMet = false;
+  img.onerror = async () => {
+    if (current !== r) return;
+    if (++i < list.length) { img.src = list[i]; return; }
+    // every stored address failed (e.g. Moonlight, Strandgade 30): ask the Met for its current image
+    if (!askedMet) {
+      askedMet = true;
+      try {
+        const o = await getObject(r.id);
+        const fresh = [o.primaryImage, o.primaryImageSmall].filter(Boolean).map(u => u.replace(/^http:\/\//, "https://"))
+          .filter(u => !list.includes(u));
+        if (fresh.length && current === r) { list.push(...fresh); r.thumb = r.thumb || fresh[0]; img.src = list[i]; return; }
+      } catch {}
+    }
+    img.classList.remove("loaded");   // nothing left: leave the grey frame
+  };
+  img.src = list[0] || "";
+  if (img.complete && img.naturalWidth) img.classList.add("loaded");
+}
+
 function renderRecord() {
   const r = current;
   $("restart-btn").hidden = r.id === SEED.id && !$("results").children.length;
-  const img = $("painting");
-  img.classList.remove("loaded");
-  img.onload = () => img.classList.add("loaded");
-  img.alt = r.title + (r.artist ? " by " + r.artist : "");
-  img.src = r.image;
-  if (img.complete && img.naturalWidth) img.classList.add("loaded");
+  showImage(r);
 
   $("artist-name").textContent = r.artist;
   $("artist-name").style.display = r.artist ? "" : "none";
@@ -814,7 +844,7 @@ function renderNegative() {
     let html;
     if (st === "pending") html = `<p class="gen-note pulse">Unsaying the record\u2026</p>`;
     else if (needsKey()) html = `<p class="gen-note">The free model isn\u2019t connected.</p>`;
-    else html = `<p class="gen-note">${st ? esc(st) : "This record has not been unsaid yet."}<button type="button" onclick="generate(true)">Unsay this record</button></p>`;
+    else html = `<p class="gen-note">${st ? esc(st) : "This record has not been unsaid yet."}<button type="button" onclick="generate(false)">Unsay this record</button></p>`;
     negPanel.innerHTML = html;
     absPanel.appendChild(heading);
     absPanel.insertAdjacentHTML("beforeend", html);
@@ -1142,8 +1172,7 @@ function select(rec) {
   if (rec.id === SEED.id) h.delete("id"); else h.set("id", rec.id);
   history.replaceState(null, "", h.toString() ? "#" + h : location.pathname + location.search);
   document.querySelectorAll(".thumb").forEach(t => t.classList.toggle("active", Number(t.dataset.id) === rec.id));
-  renderRecord();
-  generate(false);
+  renderRecord();   // nothing is sent to the model until "Unsay this record" is tapped
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -1207,22 +1236,57 @@ function scanAndClose(src) {
   return out + stack.reverse().join("");
 }
 
-function readRecord(text) {
+function readRecord(text, part = "negation", labels = []) {
   let t = String(text || "")
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
-    .replace(/```(?:json)?/gi, "")
+    .replace(/```(?:json|JSON)?/g, "")
     .trim();
-  const start = t.indexOf("{");
-  if (start < 0) return null;
-  t = t.slice(start);
-  const candidates = [t, scanAndClose(t)];
-  for (const c of candidates) {
-    for (const variant of [c, c.replace(/,\s*([}\]])/g, "$1")]) {
-      try {
-        const obj = JSON.parse(variant);
-        if (obj && typeof obj === "object" && (obj.negations || obj.absences)) return obj;
-      } catch {}
+
+  // a) JSON, possibly wrapped in prose, cut off, or with stray commas
+  const tryParse = src => {
+    for (const c of [src, scanAndClose(src)]) {
+      for (const v of [c, c.replace(/,\s*([}\]])/g, "$1")]) {
+        try { return JSON.parse(v); } catch {}
+      }
     }
+    return null;
+  };
+  const objStart = t.indexOf("{"), arrStart = t.indexOf("[");
+  let obj = null;
+  if (objStart >= 0 && (arrStart < 0 || objStart < arrStart)) obj = tryParse(t.slice(objStart));
+  else if (arrStart >= 0) obj = tryParse(t.slice(arrStart));
+
+  if (Array.isArray(obj)) obj = part === "absence" ? { absences: obj } : { negations: obj };
+  if (obj && typeof obj === "object") {
+    if (obj.negations || obj.absences) return obj;
+    // field labels at the top level, without the "negations" wrapper
+    const lower = labels.map(l => l.toLowerCase());
+    const hits = Object.keys(obj).filter(k => lower.includes(k.toLowerCase().replace(/:$/, "").trim()));
+    if (part === "negation" && hits.length) return { ...obj, negations: Object.fromEntries(hits.map(k => [k, obj[k]])) };
+    // any single list inside the object, for the absences
+    if (part === "absence") {
+      const list = Object.values(obj).find(v => Array.isArray(v));
+      if (list) return { absences: list };
+    }
+  }
+
+  // b) no JSON at all: read plain lines
+  const lines = t.split(/\n+/).map(l => l.replace(/\*\*|__/g, "").replace(/^\s*(?:[-*\u2022]|\d+[.)])\s*/, "").trim()).filter(Boolean);
+  if (part === "negation" && labels.length) {
+    const negations = {};
+    let currentLabel = null;
+    for (const line of lines) {
+      const m = line.match(/^([A-Za-z][A-Za-z ]{1,30}):\s*(.*)$/);
+      if (m && labels.some(l => l.toLowerCase() === m[1].trim().toLowerCase())) {
+        currentLabel = labels.find(l => l.toLowerCase() === m[1].trim().toLowerCase());
+        negations[currentLabel] = m[2];
+      } else if (currentLabel) negations[currentLabel] = (negations[currentLabel] + " " + line).trim();
+    }
+    if (Object.keys(negations).length) return { negations };
+  }
+  if (part === "absence") {
+    const sentences = lines.filter(l => !/^(here|sure|absences?|what is absent)\b.*:?$/i.test(l) && l.length > 20);
+    if (sentences.length) return { absences: sentences };
   }
   return null;
 }
@@ -1253,12 +1317,15 @@ async function callModel(messages, avoid = new Set(), part = "negation") {
   // the Worker does its own fallbacks; the direct route tries up to three groups of three free models
   // the Worker always uses its one model: ask twice at most, in case the first answer is unreadable
   // one request per attempt: every request counts toward the 50-a-day free limit
-  const groups = key ? [chain.slice(0, 3), chain.slice(3, 6), chain.slice(6, 9)].filter(g => g.length) : [[chosen]];
+  // one request normally; a second, fresh one only if the first answer couldn't be read
+  const groups = key ? [chain.slice(0, 3), chain.slice(3, 6), chain.slice(6, 9)].filter(g => g.length) : [[chosen], [chosen]];
+  let attempt = 0;
   if (key) groups.push(["openrouter/free"]);   // last resort: OpenRouter picks any free model that fits
   for (const group of groups) {
+    if (attempt++ && !key && !(last && last.status === 422)) break;   // retry only after an unreadable answer
     const headers = { "Content-Type": "application/json" };
     const body = { model: group[0], messages, temperature: 0.8, max_tokens: part === "absence" ? 600 : 1800,
-                   record_id: current.id, record_part: part, fresh: !!generateFresh };   // lets the Worker reuse a record it already wrote
+                   record_id: current.id, record_part: part, fresh: !!generateFresh || attempt > 1 };   // lets the Worker reuse a record it already wrote
     if (key) {
       headers.Authorization = "Bearer " + key;
       headers["HTTP-Referer"] = location.origin && location.origin !== "null" ? location.origin : "https://github.com";
@@ -1276,7 +1343,8 @@ async function callModel(messages, avoid = new Set(), part = "negation") {
       const j = await res.json().catch(() => ({}));
       let text = j.choices?.[0]?.message?.content || "";
       if (Array.isArray(text)) text = text.map(c => c.text || "").join("");
-      const record = readRecord(text);
+      const record = readRecord(text, part, current.standard.map(([k]) => k));
+      if (!record) console.warn(`[unsay] unreadable ${part} answer from ${j.model || group[0]}:`, String(text).slice(0, 600));
       if (record && (part === "negation" ? record.negations : record.absences)) {
         // complete enough? (most fields negated, and a real list of absences)
         const got = Object.keys(negationMap(record)).length;
@@ -1389,7 +1457,6 @@ $("key-panel").onsubmit = e => {
   if (isFree(model)) localStorage.setItem("cnpa:model:free", model);
   $("key-panel").classList.remove("open");
   delete genState[current.id];
-  generate(false);
   renderNegative();
 };
 
@@ -1402,6 +1469,13 @@ $("search-form").onsubmit = e => {
 // Start with the original record; a link with #q=keywords opens that search instead
 renderRecord();
 loadProxyInfo();
+// Moonlight, Strandgade 30: also ask the Met for its current image files, in case the IIIF address fails
+getObject(SEED.id).then(o => {
+  const extra = [o.primaryImage, o.primaryImageSmall].filter(Boolean).map(u => String(u).replace(/^http:\/\//, "https://"));
+  SEED.imageFallbacks = extra;
+  const img = $("painting");
+  if (current === SEED && !(img.complete && img.naturalWidth)) showImage(SEED);
+}).catch(() => {});
 (async () => {
   const h = new URLSearchParams(location.hash.slice(1));
   const startQ = h.get("q"), startId = Number(h.get("id"));
