@@ -1,0 +1,1294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Not an Archive">
+<meta name="theme-color" content="#ffffff">
+<title>This Is Not an Archive</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --fg-secondary: #444;
+    --fg-dim: #888;
+    --fg-faint: #999;
+    --border: #e0e0e0;
+    --border-light: #eee;
+    --accent: #e06030;
+    --hover-bg: #fafafa;
+    --serif: 'EB Garamond', 'Georgia', 'Times New Roman', serif;
+    --sans: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    --transition-speed: 0.8s;
+  }
+
+  body {
+    font-family: var(--serif);
+    background: var(--bg);
+    color: var(--fg);
+    transition: background var(--transition-speed) ease, color var(--transition-speed) ease;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body.apophatic {
+    --bg: #0a0a0a;
+    --fg: #d4d0c8;
+    --fg-secondary: #b0aca4;
+    --fg-dim: #666;
+    --fg-faint: #555;
+    --border: #222;
+    --border-light: #222;
+    --accent: #777;
+    --hover-bg: rgba(255,255,255,0.03);
+  }
+
+  /* Top bar */
+  .topbar {
+    border-bottom: 1px solid var(--border);
+    padding: 10px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-family: var(--sans);
+    transition: border-color var(--transition-speed) ease;
+  }
+  .topbar-left {
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.15em;
+    color: var(--fg);
+    transition: color var(--transition-speed) ease;
+  }
+  body.apophatic .topbar-left { color: #888; }
+  .topbar-right {
+    color: var(--fg-faint);
+    transition: color var(--transition-speed) ease;
+  }
+  body.apophatic .topbar-right { color: #444; }
+
+  /* Breadcrumb */
+  .breadcrumb {
+    padding: 16px 24px 0;
+    font-size: 12px;
+    font-family: var(--sans);
+    color: var(--fg-dim);
+    transition: color var(--transition-speed) ease;
+  }
+  .breadcrumb span { cursor: pointer; }
+  .breadcrumb .sep { margin: 0 8px; cursor: default; }
+  .breadcrumb .current {
+    color: var(--fg);
+    transition: color var(--transition-speed) ease;
+  }
+  body.apophatic .breadcrumb .current { color: #888; }
+
+  /* Main layout */
+  .main {
+    display: flex;
+    gap: 40px;
+    padding: 24px;
+    max-width: 1100px;
+    margin: 0 auto;
+    flex-wrap: wrap;
+  }
+
+  /* Image column */
+  .image-col {
+    flex: 1 1 380px;
+    min-width: 280px;
+    max-width: 520px;
+  }
+  .image-wrap {
+    position: relative;
+    overflow: hidden;
+    background: #f5f5f5;
+    transition: background var(--transition-speed) ease;
+  }
+  body.apophatic .image-wrap { background: #111; }
+
+  .image-wrap img {
+    width: 100%;
+    display: block;
+    opacity: 0;
+    transition: opacity 0.8s ease, filter 0.8s ease;
+  }
+  .image-wrap img.loaded { opacity: 1; }
+  body.apophatic .image-wrap img.loaded {
+    opacity: 0.35;
+    filter: grayscale(0.3);
+  }
+
+  .image-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: flex-end;
+    padding: 24px;
+    background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 60%);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+  }
+  body.apophatic .image-overlay { opacity: 1; }
+  .image-overlay p {
+    font-style: italic;
+    font-size: 14px;
+    line-height: 1.7;
+    color: #aaa;
+    max-width: 90%;
+  }
+
+  .image-caption {
+    margin-top: 12px;
+    font-size: 11px;
+    font-family: var(--sans);
+    color: var(--fg-faint);
+    line-height: 1.5;
+    transition: color var(--transition-speed) ease;
+  }
+  .public-domain {
+    margin-top: 10px;
+    font-size: 11px;
+    font-family: var(--sans);
+    color: #888;
+    transition: opacity 0.4s ease;
+  }
+  body.apophatic .public-domain { opacity: 0; height: 0; overflow: hidden; }
+
+  /* Details column */
+  .details-col {
+    flex: 1 1 380px;
+    min-width: 280px;
+  }
+
+  .artwork-title {
+    font-size: 28px;
+    font-weight: 400;
+    line-height: 1.3;
+    margin: 0 0 6px 0;
+    font-family: var(--serif);
+    color: var(--fg);
+    transition: color var(--transition-speed) ease;
+  }
+  .title-struck {
+    text-decoration: line-through;
+    opacity: 0.4;
+  }
+
+  .artist-name {
+    font-size: 15px;
+    color: var(--accent);
+    margin: 0 0 4px 0;
+    font-family: var(--sans);
+    transition: color var(--transition-speed) ease, opacity var(--transition-speed) ease;
+  }
+  body.apophatic .artist-name {
+    text-decoration: line-through;
+    opacity: 0.5;
+  }
+
+  .artist-nationality {
+    font-size: 14px;
+    color: var(--fg-dim);
+    margin: 0 0 20px 0;
+    font-family: var(--sans);
+    transition: color var(--transition-speed) ease;
+  }
+  body.apophatic .artist-nationality { font-style: italic; }
+
+  .artwork-date {
+    font-size: 15px;
+    color: var(--fg);
+    margin: 0 0 24px 0;
+    transition: color var(--transition-speed) ease;
+  }
+  body.apophatic .artwork-date { color: var(--fg-dim); }
+
+  .curatorial-text {
+    font-size: 14px;
+    line-height: 1.8;
+    color: #444;
+    margin: 0 0 28px 0;
+    max-width: 520px;
+    transition: opacity 0.4s ease, max-height 0.4s ease;
+  }
+  body.apophatic .curatorial-text { opacity: 0; max-height: 0; overflow: hidden; margin: 0; }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+    transition: border-color var(--transition-speed) ease;
+  }
+  .tab-btn {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 16px;
+    font-size: 12px;
+    font-family: var(--sans);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    color: var(--fg-dim);
+    font-weight: 400;
+    transition: color 0.3s ease, border-color 0.3s ease;
+    white-space: nowrap;
+  }
+  .tab-btn:hover { opacity: 0.7; }
+  .tab-btn.active {
+    color: var(--fg);
+    font-weight: 600;
+    border-bottom-color: var(--fg);
+  }
+  body.apophatic .tab-btn.active {
+    color: #c8c4bc;
+    border-bottom-color: #888;
+  }
+
+  /* Tab panels */
+  .tab-panel {
+    display: none;
+    max-height: 420px;
+    overflow-y: auto;
+    padding-right: 8px;
+  }
+  .tab-panel.active { display: block; }
+
+  .tab-panel::-webkit-scrollbar { width: 4px; }
+  .tab-panel::-webkit-scrollbar-track { background: transparent; }
+  .tab-panel::-webkit-scrollbar-thumb { background: #ccc; border-radius: 2px; }
+  body.apophatic .tab-panel::-webkit-scrollbar-thumb { background: #333; }
+
+  /* Standard meta rows */
+  .meta-row {
+    display: flex;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-light);
+    transition: background 0.2s ease;
+  }
+  .meta-row:hover { background: var(--hover-bg); }
+  .meta-label {
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg);
+    min-width: 120px;
+    flex-shrink: 0;
+    padding-top: 2px;
+    transition: color var(--transition-speed) ease;
+  }
+  .meta-value {
+    font-size: 13px;
+    color: var(--fg-secondary);
+    line-height: 1.5;
+    transition: color var(--transition-speed) ease;
+  }
+
+  /* Negation rows */
+  .neg-row {
+    display: flex;
+    padding: 10px 0;
+    border-bottom: 1px solid #222;
+    transition: background 0.3s ease;
+  }
+  .neg-row:hover { background: rgba(255,255,255,0.03); }
+  .neg-label {
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 600;
+    color: #666;
+    min-width: 120px;
+    flex-shrink: 0;
+    padding-top: 2px;
+    text-decoration: line-through;
+    opacity: 0.6;
+  }
+  .neg-value {
+    font-size: 13px;
+    color: #b0aca4;
+    line-height: 1.7;
+    font-style: italic;
+  }
+  .neg-row .neg-label,
+  .neg-row .neg-value {
+    opacity: 0;
+    animation: fadeIn 0.6s ease forwards;
+  }
+
+  /* Absence panel */
+  .absence-heading {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #555;
+    font-family: var(--sans);
+    margin-bottom: 16px;
+  }
+  .absence-item {
+    font-size: 13.5px;
+    line-height: 1.85;
+    color: #b0aca4;
+    margin: 0 0 16px 0;
+    padding-left: 16px;
+    border-left: 1px solid #2a2a2a;
+    opacity: 0;
+    animation: fadeIn 0.6s ease forwards;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Bottom bar */
+  .bottom-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 12px 24px;
+    background: linear-gradient(to top, #0a0a0a, transparent);
+    text-align: center;
+    font-size: 11px;
+    font-family: var(--sans);
+    color: #444;
+    letter-spacing: 0.1em;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+  }
+  body.apophatic .bottom-bar { opacity: 1; }
+
+  /* ───── Added: search by keyword, key panel, iPad ───── */
+  .topbar { padding-top: max(10px, env(safe-area-inset-top)); }
+  .topbar-right { display: flex; align-items: center; gap: 16px; }
+  .key-btn {
+    background: none; border: none; border-left: 1px solid var(--border);
+    padding: 6px 0 6px 16px; min-height: 36px;
+    font: inherit; letter-spacing: inherit; text-transform: inherit;
+    color: var(--fg-dim); cursor: pointer;
+  }
+
+  .key-panel {
+    display: none;
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    font-family: var(--sans);
+    font-size: 12px;
+    color: var(--fg-dim);
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .key-panel.open { display: flex; }
+  .key-panel input, .key-panel select {
+    font-family: var(--sans); font-size: 16px; color: var(--fg);
+    background: transparent; border: none; border-bottom: 1px solid var(--border);
+    padding: 6px 0; border-radius: 0; min-width: 0;
+  }
+  .key-panel input { flex: 1 1 220px; }
+  .key-panel button, .search-row button {
+    background: none; border: none; cursor: pointer; min-height: 40px;
+    font-family: var(--sans); font-size: 12px; text-transform: uppercase;
+    letter-spacing: 0.08em; font-weight: 600; color: var(--fg);
+  }
+  .key-panel .note { flex-basis: 100%; line-height: 1.5; }
+
+  .search-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 24px 0;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  .search-row input {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--serif);
+    font-size: 20px;
+    color: var(--fg);
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    padding: 6px 0;
+    -webkit-appearance: none;
+    transition: border-color var(--transition-speed) ease, color var(--transition-speed) ease;
+  }
+  .search-row input:focus { outline: none; border-bottom-color: var(--fg); }
+  body.apophatic .search-row input { font-style: italic; }
+  .search-status {
+    font-family: var(--sans); font-size: 11px; color: var(--fg-faint);
+    white-space: nowrap;
+  }
+
+  .results-strip {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 14px 24px 2px;
+    max-width: 1100px;
+    margin: 0 auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .results-strip::-webkit-scrollbar { display: none; }
+  .results-strip:empty { display: none; }
+  .thumb {
+    flex: 0 0 auto;
+    height: 72px;
+    background: #f5f5f5;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    outline: 1px solid transparent;
+    outline-offset: 2px;
+    transition: outline-color 0.3s ease, opacity 0.3s ease, background var(--transition-speed) ease;
+  }
+  body.apophatic .thumb { background: #111; opacity: 0.45; }
+  .thumb img { height: 72px; width: auto; display: block; }
+  .thumb.active { outline-color: var(--fg); }
+  body.apophatic .thumb.active { opacity: 1; outline-color: #777; }
+
+  .gen-note {
+    font-size: 14px;
+    font-style: italic;
+    line-height: 1.8;
+    color: #777;
+    padding: 8px 0;
+  }
+  .gen-note.pulse { animation: pulse 1.6s ease-in-out infinite; }
+  .gen-note button {
+    display: block; margin-top: 10px; background: none; border: none;
+    font-family: var(--sans); font-style: normal; font-size: 12px;
+    text-transform: uppercase; letter-spacing: 0.08em; color: #aaa;
+    cursor: pointer; min-height: 40px; padding: 0;
+  }
+  .gen-foot {
+    margin-top: 14px; font-family: var(--sans); font-size: 11px; color: #555;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  }
+  .gen-foot button {
+    background: none; border: none; color: #888; font: inherit;
+    text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; min-height: 40px;
+  }
+  @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+
+  /* iPad: larger touch targets, panels sized to the screen */
+  .tab-btn { min-height: 44px; }
+  @media (min-width: 744px) and (max-width: 1366px) {
+    .tab-panel { max-height: calc(100dvh - 330px); min-height: 260px; }
+    .meta-value, .neg-value { font-size: 14px; }
+    .absence-item { font-size: 14.5px; }
+  }
+  @media (max-width: 900px) {
+    .image-col { max-width: none; flex-basis: 100%; }
+    .image-wrap { display: flex; justify-content: center; }
+    .image-wrap img { width: auto; max-width: 100%; max-height: 55vh; }
+    .tab-panel { max-height: none; overflow: visible; }
+    .main { padding-bottom: 80px; }
+  }
+  @media (hover: none) { .tab-btn:hover { opacity: 1; } }
+
+  /* Credit, always visible at the bottom */
+  .bottom-bar {
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 28px 24px calc(14px + env(safe-area-inset-bottom));
+    background: linear-gradient(to top, var(--bg) 55%, transparent);
+    color: var(--fg-dim);
+    opacity: 1;
+    line-height: 1.4;
+  }
+  .bottom-bar .credit-title { font-weight: 600; letter-spacing: 0.15em; color: var(--fg); }
+  .bottom-bar .credit-line { font-family: var(--serif); font-size: 13px; letter-spacing: 0; text-transform: none; }
+  body.apophatic .bottom-bar { color: #555; }
+  body.apophatic .bottom-bar .credit-title { color: #777; }
+  body { padding-bottom: 110px; }
+  body.apophatic .artwork-date { margin-top: 18px; }
+</style>
+</head>
+<body>
+
+  <!-- Top bar -->
+  <div class="topbar">
+    <span class="topbar-left" id="topbar-title">The Met</span>
+    <span class="topbar-right"><span id="topbar-right"></span><button class="key-btn" id="key-btn" type="button">Key</button></span>
+  </div>
+
+  <!-- Model key panel -->
+  <form class="key-panel" id="key-panel">
+    <select id="provider-input" aria-label="Model provider">
+      <option value="claude">Claude (secure)</option>
+      <option value="openrouter">OpenRouter</option>
+      <option value="huggingface">Hugging Face</option>
+      <option value="pollinations">Pollinations</option>
+    </select>
+    <input id="key-input" type="password" placeholder="API key" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="API key">
+    <input id="model-input" list="model-list" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Model">
+    <datalist id="model-list"></datalist>
+    <button type="submit">Save</button>
+    <span class="note" id="key-note"></span>
+  </form>
+
+  <!-- Breadcrumb -->
+  <div class="breadcrumb">
+    <span id="bc-collection">The Met Collection</span>
+    <span class="sep">›</span>
+    <span id="bc-search">Search Art</span>
+    <span class="sep">›</span>
+    <span class="current" id="bc-title">Moonlight, Strandgade 30</span>
+  </div>
+
+  <!-- Search by keyword -->
+  <form class="search-row" id="search-form" role="search">
+    <input id="q" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search for other paintings" aria-label="Search keywords">
+    <button type="submit">Search</button>
+    <span class="search-status" id="search-status" aria-live="polite"></span>
+  </form>
+  <div class="results-strip" id="results"></div>
+
+  <!-- Main -->
+  <div class="main">
+
+    <!-- Image column -->
+    <div class="image-col">
+      <div class="image-wrap">
+        <img id="painting" src="https://collectionapi.metmuseum.org/api/collection/v1/iiif/441933/802838/main-image" alt="Moonlight, Strandgade 30 by Vilhelm Hammershøi" />
+        <div class="image-overlay">
+          <p id="overlay-text">Ceci n'est pas une archive.</p>
+        </div>
+      </div>
+      <div class="image-caption" id="image-caption">
+        Moonlight, Strandgade 30, Vilhelm Hammershøi (Danish, Copenhagen 1864–1916 Copenhagen), Oil on canvas
+      </div>
+      <div class="public-domain" id="public-domain">Public Domain</div>
+    </div>
+
+    <!-- Details column -->
+    <div class="details-col">
+      <h1 class="artwork-title" id="artwork-title">Moonlight, Strandgade 30</h1>
+      <p class="artist-name" id="artist-name">Vilhelm Hammershøi</p>
+      <p class="artist-nationality" id="artist-nationality">Danish</p>
+      <p class="artwork-date" id="artwork-date">1900–1906</p>
+
+      <p class="curatorial-text" id="curatorial-text">
+        Hammershøi depicted this parlor in his apartment in Copenhagen at morning, noon, and night. In this scene, he employed deep lavender hues and velvety brushwork to capture the effect of moonlight. The emptiness of the space accentuates the qualities of the illumination and the geometric patterns of the architecture.
+      </p>
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="standard" onclick="switchTab('standard')">Artwork Details</button>
+        <button class="tab-btn" data-tab="negation" onclick="switchTab('negation')">Negation Metadata</button>
+        <button class="tab-btn" data-tab="absence" onclick="switchTab('absence')">What Is Absent</button>
+      </div>
+
+      <!-- Standard panel -->
+      <div class="tab-panel active" id="panel-standard"></div>
+
+      <!-- Negation panel -->
+      <div class="tab-panel" id="panel-negation"></div>
+
+      <!-- Absence panel -->
+      <div class="tab-panel" id="panel-absence"></div>
+    </div>
+  </div>
+
+  <!-- Bottom bar -->
+  <div class="bottom-bar">
+    <span class="credit-title">THIS IS NOT AN ARCHIVE</span>
+    <span class="credit-line">From the Series “Experiments in Slow Archiving”</span>
+    <span class="credit-line">A Project by Giulia Taurino</span>
+  </div>
+
+<script>
+/* ─────────────────────────────────────────────────────────────
+   Configuration — open-weight vision models only (Llama, Qwen, Gemma)
+   reached through three providers that speak the OpenAI chat format.
+   Each visitor can add their own free key under "Key". To give every
+   visitor a working default, paste a key into SITE_KEYS — but note that
+   on a public GitHub Pages site it is readable in the page source.
+   ───────────────────────────────────────────────────────────── */
+const SITE_KEYS = {
+  openrouter: "",      // sk-or-...   from openrouter.ai/keys
+  huggingface: "",     // hf_...      from huggingface.co/settings/tokens (fine-grained, "Inference Providers" permission)
+  pollinations: ""     // pk_...      publishable key from enter.pollinations.ai (made for browser use)
+};
+/* Claude runs through your own Cloudflare Worker (see proxy/claude-worker.js and SETUP.md).
+   The Anthropic API key is stored as a secret inside the Worker, never in this file,
+   so nothing secret is published on GitHub. Paste the Worker's address here: */
+const CLAUDE_PROXY_URL = "";   // e.g. "https://not-an-archive-claude.yourname.workers.dev"
+
+const DEFAULT_PROVIDER = CLAUDE_PROXY_URL ? "claude" : "openrouter";
+
+const MET = "https://collectionapi.metmuseum.org/public/collection/v1";
+// /v1/search was retired by the Met on 1 October 2026 (it now answers 410);
+// search uses the paginated /v1.1/search endpoint instead.
+const MET_SEARCH = "https://collectionapi.metmuseum.org/public/collection/v1.1/search";
+const PAGE_SIZE = 500;        // the Met caps limit at 500
+const MAX_OFFSET = 10000;     // offset + limit may not exceed 10,000
+const TARGET_IMAGES = 200;    // paintings with viewable images to show per search
+
+const imageObj = url => ({ type: "image_url", image_url: { url } });
+const PROVIDERS = {
+  claude: {
+    name: "Claude",
+    endpoint: CLAUDE_PROXY_URL,
+    keyless: true,      // the key lives in the Worker
+    defaultModel: "claude-sonnet-5-5",
+    models: ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5"],
+    keyHelp: "",
+    headers: () => ({})
+  },
+  openrouter: {
+    name: "OpenRouter",
+    endpoint: "https://openrouter.ai/api/v1/chat/completions",
+    defaultModel: "meta-llama/llama-4-maverick",
+    models: ["meta-llama/llama-4-maverick", "meta-llama/llama-4-maverick:free", "meta-llama/llama-4-scout",
+             "qwen/qwen3-vl-235b-a22b-instruct", "qwen/qwen3-vl-32b-instruct", "qwen/qwen2.5-vl-72b-instruct:free",
+             "google/gemma-3-27b-it", "google/gemma-3-27b-it:free"],
+    keyHelp: "openrouter.ai/keys (models ending in :free cost nothing)",
+    headers: () => ({ "HTTP-Referer": location.origin && location.origin !== "null" ? location.origin : "https://github.com", "X-Title": "This Is Not an Archive" })
+  },
+  huggingface: {
+    name: "Hugging Face",
+    endpoint: "https://router.huggingface.co/v1/chat/completions",
+    defaultModel: "Qwen/Qwen2.5-VL-72B-Instruct",
+    models: ["Qwen/Qwen2.5-VL-72B-Instruct", "Qwen/Qwen2.5-VL-7B-Instruct", "meta-llama/Llama-4-Maverick-17B-128E-Instruct",
+             "meta-llama/Llama-4-Scout-17B-16E-Instruct", "google/gemma-3-27b-it"],
+    keyHelp: "huggingface.co/settings/tokens (free account includes monthly credit)",
+    headers: () => ({})
+  },
+  pollinations: {
+    name: "Pollinations",
+    endpoint: "https://gen.pollinations.ai/v1/chat/completions",
+    modelsURL: "https://gen.pollinations.ai/v1/models",   // listed live, no key needed
+    defaultModel: "",
+    models: [],
+    keyHelp: "enter.pollinations.ai (use a publishable pk_ key)",
+    headers: () => ({})
+  }
+};
+const OPEN_FAMILY = /llama|qwen|gemma|deepseek|phi|olmo|glm|kimi|intern/i;
+
+const settings = {
+  provider: PROVIDERS[localStorage.getItem("cnpa:provider")] ? localStorage.getItem("cnpa:provider") : DEFAULT_PROVIDER,
+  get p() { return PROVIDERS[this.provider]; },
+  get key() { return localStorage.getItem("cnpa:key:" + this.provider) || SITE_KEYS[this.provider] || ""; },
+  get model() { return localStorage.getItem("cnpa:model:" + this.provider) || this.p.defaultModel; }
+};
+const needsKey = () => settings.p.keyless ? !settings.p.endpoint : (!settings.key || !settings.model);
+
+// remove anything left on this device from the earlier Mistral setup
+["cnpa:key", "cnpa:model", "cnpa:key:mistral", "cnpa:model:mistral"].forEach(k => localStorage.removeItem(k));
+
+// Pollinations: discover which open models are live right now
+async function loadPollinationsModels() {
+  const P = PROVIDERS.pollinations;
+  if (P.models.length) return;
+  try {
+    const j = await (await fetch(P.modelsURL)).json();
+    const ids = (j.data || j || []).map(m => (typeof m === "string" ? m : m.id)).filter(Boolean);
+    P.models = ids.filter(id => OPEN_FAMILY.test(id));
+    P.defaultModel = P.models.find(id => /vl|vision|llama-4|gemma-3|maverick|scout/i.test(id)) || P.models[0] || "";
+  } catch {}
+}
+
+/* ─────────────────────────────────────────────────────────────
+   The original record: Moonlight, Strandgade 30 (written by hand)
+   ───────────────────────────────────────────────────────────── */
+const SEED = {
+  id: 441933,
+  title: "Moonlight, Strandgade 30",
+  artist: "Vilhelm Hammershøi",
+  nationality: "Danish",
+  date: "1900–1906",
+  caption: "Moonlight, Strandgade 30, Vilhelm Hammersh\u00f8i (Danish, Copenhagen 1864\u20131916 Copenhagen), Oil on canvas",
+  curatorial: "Hammershøi depicted this parlor in his apartment in Copenhagen at morning, noon, and night. In this scene, he employed deep lavender hues and velvety brushwork to capture the effect of moonlight. The emptiness of the space accentuates the qualities of the illumination and the geometric patterns of the architecture.",
+  image: "https://collectionapi.metmuseum.org/api/collection/v1/iiif/441933/802838/main-image",
+  thumb: "https://collectionapi.metmuseum.org/api/collection/v1/iiif/441933/802838/main-image",
+  publicDomain: true,
+  standard: [
+    ["Title", "Moonlight, Strandgade 30"],
+    ["Artist", "Vilhelm Hammershøi (Danish, Copenhagen 1864–1916 Copenhagen)"],
+    ["Date", "1900–1906"],
+    ["Medium", "Oil on canvas"],
+    ["Dimensions", "16 1/8 × 20 1/8 in. (41 × 51.1 cm)"],
+    ["Classification", "Paintings"],
+    ["Credit Line", "Purchase, European Paintings Funds, and Annette de la Renta Gift, 2012"],
+    ["Object Number", "2012.203"],
+    ["Department", "European Paintings"],
+    ["On view at", "The Met Fifth Avenue in Gallery 813"]
+  ],
+  neg: {
+    authored: true,
+    breadcrumb: "Not Moonlight, Not Strandgade 30",
+    caption: "Not this image. The painting exists elsewhere, in the room it refuses to describe.",
+    overlay: "Ceci n\u2019est pas une archive.",
+    negations: [
+      ["Title", "Not daylight. Not noon. Not an address. Not a landscape seen from outside. Not an elsewhere. Not untitled\u2014though what it titles cannot be named."],
+      ["Artist", "Not French. Not anonymous. Not a collective. Not living. Not forgotten. Not loud enough to be described by those who met him."],
+      ["Date", "Not ancient. Not contemporary. Not a single year. Not timeless. Not dated with certainty\u2014six years of not finishing or not beginning."],
+      ["Medium", "Not watercolor. Not fresco. Not charcoal on paper. Not digital. Not carved. Not woven. Not spoken aloud. Not projected. Not temporary."],
+      ["Dimensions", "Not monumental. Not miniature. Not mural-scale. Not the size of the room it contains. Not the size of the silence it measures."],
+      ["Classification", "Not sculpture. Not photograph. Not print. Not installation. Not performance. Not document. Not evidence. Not proof of anything."],
+      ["Credit Line", "Not inherited. Not stolen. Not donated by the artist. Not repatriated. Not found. Not claimed by the room it came from."],
+      ["Object Number", "Not unnumbered. Not uncounted. Not outside the system. Not free of its accession. Not nameable by any sequence of digits."],
+      ["Department", "Not Asian. Not American. Not Modern. Not decorative. Not contemporary. Not unclassifiable\u2014though it resists every category it is placed in."],
+      ["On view at", "Not in storage. Not in Copenhagen. Not at Strandgade 30. Not where it was made. Not where it belongs. Not anywhere the light resembles what it painted."]
+    ],
+    absences: [
+      "The temperature of the room on the night the painting describes, which is not the night it was painted.",
+      "Whether the courtyard visible through the window held snow or rain or the particular stillness that Copenhagen air takes on in late autumn when the harbor wind drops.",
+      "Which version of the room this is\u2014Hammersh\u00f8i rearranged his furniture like stage sets between paintings, so the metadata records a place that never existed in any fixed form.",
+      "The six years the painting may have taken, and what changed in the marriage during those years, and whether the room looked different to him at the end than at the beginning.",
+      "The sound of Strandgade 30\u2014whether the floors creaked, whether the neighbors were audible, whether a clock was present and if so whether he stopped it before working.",
+      "What Hammersh\u00f8i turned away from to paint this particular corner.",
+      "What Ida was doing in the next room.",
+      "The color the walls actually were, since his palette suppressed every hue toward grey, meaning the record\u2019s claim of \u2018oil on canvas\u2019 says nothing about the systematic subtraction the medium was used to perform.",
+      "That the painting hung in a private collection for decades, seen by almost no one, existing in a condition very close to the silence it depicts.",
+      "That Gallery 813 has a particular quality of artificial light that is nothing like moonlight, and that the painting now lives permanently inside an illumination it was made to negate."
+    ]
+  }
+};
+
+/* ─────────────────────────────────────────────────────────────
+   State
+   ───────────────────────────────────────────────────────────── */
+let current = SEED;          // the record on screen
+let currentTab = "standard";
+let lastQuery = "";          // the keywords that led to this record
+let searchToken = 0, genToken = 0;
+const genState = {};         // id -> "pending" | error message
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function cachedNeg(id) {
+  if (id === SEED.id) return SEED.neg;
+  try { return JSON.parse(localStorage.getItem("cnpa:neg:" + id)); } catch { return null; }
+}
+function storeNeg(id, neg) {
+  try { localStorage.setItem("cnpa:neg:" + id, JSON.stringify(neg)); } catch {}
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Rendering
+   ───────────────────────────────────────────────────────────── */
+function renderRecord() {
+  const r = current;
+  const img = $("painting");
+  img.classList.remove("loaded");
+  img.onload = () => img.classList.add("loaded");
+  img.alt = r.title + (r.artist ? " by " + r.artist : "");
+  img.src = r.image;
+  if (img.complete && img.naturalWidth) img.classList.add("loaded");
+
+  $("artist-name").textContent = r.artist;
+  $("artist-name").style.display = r.artist ? "" : "none";
+  $("curatorial-text").textContent = r.curatorial || "";
+  $("curatorial-text").style.display = r.curatorial ? "" : "none";
+  $("public-domain").style.display = r.publicDomain ? "" : "none";
+
+  // Standard panel
+  const std = $("panel-standard");
+  std.innerHTML = "";
+  r.standard.forEach(([label, value]) => {
+    const row = document.createElement("div");
+    row.className = "meta-row";
+    row.innerHTML = `<span class="meta-label">${esc(label)}:</span><span class="meta-value">${esc(value)}</span>`;
+    std.appendChild(row);
+  });
+
+  renderNegative();
+  switchTab(currentTab);
+}
+
+function renderNegative() {
+  const neg = cachedNeg(current.id);
+  const negPanel = $("panel-negation");
+  const absPanel = $("panel-absence");
+  negPanel.innerHTML = "";
+  absPanel.innerHTML = "";
+
+  const heading = document.createElement("p");
+  heading.className = "absence-heading";
+  heading.textContent = "Fields the schema was never designed to receive";
+
+  if (!neg) {
+    const st = genState[current.id];
+    let html;
+    if (st === "pending") html = `<p class="gen-note pulse">Unsaying the record\u2026</p>`;
+    else if (needsKey()) html = settings.p.keyless
+      ? `<p class="gen-note">Claude isn\u2019t connected to this site yet.<button type="button" onclick="openKey()">Choose another model</button></p>`
+      : `<p class="gen-note">To unsay this record, add an API key for ${esc(settings.p.name)}.<button type="button" onclick="openKey()">Add key</button></p>`;
+    else html = `<p class="gen-note">${st ? esc(st) : "This record has not been unsaid yet."}<button type="button" onclick="generate(true)">Unsay this record</button></p>`;
+    negPanel.innerHTML = html;
+    absPanel.appendChild(heading);
+    absPanel.insertAdjacentHTML("beforeend", html);
+    return;
+  }
+
+  neg.negations.forEach(([label, value], i) => {
+    const row = document.createElement("div");
+    row.className = "neg-row";
+    row.innerHTML = `<span class="neg-label" style="animation-delay:${i * 0.08}s">${esc(label)}:</span><span class="neg-value" style="animation-delay:${i * 0.08 + 0.15}s">${esc(value)}</span>`;
+    negPanel.appendChild(row);
+  });
+
+  absPanel.appendChild(heading);
+  neg.absences.forEach((text, i) => {
+    const p = document.createElement("p");
+    p.className = "absence-item";
+    p.style.animationDelay = `${i * 0.12}s`;
+    p.textContent = text;
+    absPanel.appendChild(p);
+  });
+
+  if (!neg.authored) {
+    const foot = `<div class="gen-foot"><span>Unsaid by ${esc(neg.model || "an open model")}${neg.query ? ` after a search for \u201c${esc(neg.query)}\u201d` : ""}${neg.imageSeen === false ? ", without the image" : ""}.</span><button type="button" onclick="generate(true)">Unsay again</button></div>`;
+    negPanel.insertAdjacentHTML("beforeend", foot);
+    absPanel.insertAdjacentHTML("beforeend", foot);
+  }
+}
+
+/* Tab switching — as in the original, now reading from the current record */
+function switchTab(tabId) {
+  currentTab = tabId;
+  const isApophatic = tabId !== "standard";
+  const r = current;
+  const neg = cachedNeg(r.id);
+
+  document.body.classList.toggle("apophatic", isApophatic);
+  document.querySelector('meta[name="theme-color"]').setAttribute("content", isApophatic ? "#0a0a0a" : "#ffffff");
+
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.tab === tabId);
+  });
+  document.querySelectorAll(".tab-panel").forEach(panel => panel.classList.remove("active"));
+  $("panel-" + tabId).classList.add("active");
+
+  if (tabId === "negation") reAnimateChildren($("panel-negation"), ".neg-row");
+  if (tabId === "absence") reAnimateChildren($("panel-absence"), ".absence-item");
+
+  $("topbar-title").textContent = isApophatic ? "This Is Not an Archive" : "The Met";
+  $("topbar-right").textContent = isApophatic ? "Shadow Collection" : "";
+  $("topbar-right").style.display = isApophatic ? "" : "none";
+  $("key-btn").style.borderLeft = isApophatic ? "" : "none";
+  $("key-btn").style.paddingLeft = isApophatic ? "" : "0";
+  $("bc-collection").textContent = isApophatic ? "The Shadow Collection" : "The Met Collection";
+  $("bc-search").textContent = isApophatic ? "Search Absence" : "Search Art";
+  $("q").placeholder = isApophatic ? "Search for what the records do not hold" : "Search for other paintings";
+
+  if (isApophatic) {
+    $("bc-title").textContent = neg?.breadcrumb || "Not " + r.title;
+    $("artwork-title").innerHTML = `<span class="title-struck">${esc(r.title)}</span>`;
+    $("artist-nationality").textContent = "";
+    $("artist-nationality").style.display = "none";
+    $("artwork-date").innerHTML = r.date ? `<span class="title-struck">${esc(r.date)}</span>` : "";
+    $("image-caption").textContent = neg?.caption || "Not this image.";
+    $("overlay-text").textContent = tabId === "negation"
+      ? (neg?.overlay || "Ceci n\u2019est pas une archive.")
+      : "What you see is what the record could not hold.";
+  } else {
+    $("bc-title").textContent = r.title;
+    $("artwork-title").textContent = r.title;
+    $("artist-nationality").textContent = r.nationality;
+    $("artist-nationality").style.display = r.nationality ? "" : "none";
+    $("artwork-date").textContent = r.date;
+    $("image-caption").textContent = r.caption;
+  }
+
+  $("panel-" + tabId).scrollTop = 0;
+}
+
+function reAnimateChildren(container, selector) {
+  container.querySelectorAll(selector).forEach(el => {
+    const clone = el.cloneNode(true);
+    el.parentNode.replaceChild(clone, el);
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────
+   The Met: search by keyword, then fetch each object
+   ───────────────────────────────────────────────────────────── */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* How requests reach the Met.
+   1. Directly from the browser (normal case).
+   2. If the browser can't get an answer (blocked request, dropped connection),
+      through a relay. Only public Met data passes through it; no key is ever sent.
+      Set MET_RELAY to your own Cloudflare Worker URL + "?url=" to avoid relying on a public one. */
+const MET_RELAY = "https://api.allorigins.win/raw?url=";
+let useRelay = false;          // switched on automatically after a direct request fails
+
+class MetError extends Error {
+  constructor(msg, status, network) { super(msg); this.status = status; this.network = network; }
+}
+
+async function fetchOnce(url, relay) {
+  let res;
+  try { res = await fetch(relay ? MET_RELAY + encodeURIComponent(url) : url, { cache: "no-store" }); }
+  catch { throw new MetError("no response", 0, true); }
+  if (!res.ok) throw new MetError(`status ${res.status}`, res.status, false);
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); }
+  catch { throw new MetError("not JSON", res.status, true); }   // e.g. a bot-check page
+  if (!data || typeof data !== "object") throw new MetError("empty answer", res.status, true);
+  return data;
+}
+
+// one URL, with retries; falls back to the relay if the direct route gets no usable answer
+async function metFetch(url, tries = 3, only) {
+  const routes = only !== undefined ? [only] : useRelay ? [true] : [false, true];
+  let last;
+  for (const relay of routes) {
+    for (let attempt = 0; attempt < tries; attempt++) {
+      try {
+        const data = await fetchOnce(url, relay);
+        if (relay && !useRelay) useRelay = true;    // remember the route that works
+        return data;
+      } catch (e) {
+        last = e;
+        if (e.status === 404) throw e;
+        const busy = e.network || e.status === 403 || e.status === 429 || e.status >= 500;
+        if (!busy) break;                            // a 400 won't improve with retries
+        await sleep(500 * 2 ** attempt);
+      }
+    }
+  }
+  throw last;
+}
+
+async function metJSON(path, tries = 3) {
+  return metFetch(MET + path, tries);
+}
+
+function fromMet(o) {
+  const artistLine = o.artistDisplayName
+    ? o.artistDisplayName + (o.artistDisplayBio ? ` (${o.artistDisplayBio})` : "")
+    : "";
+  const place = [o.city, o.region, o.country].filter(Boolean).join(", ");
+  const standard = [
+    ["Title", o.title],
+    ["Artist", artistLine],
+    ["Culture", o.culture],
+    ["Period", o.period],
+    ["Date", o.objectDate],
+    ["Geography", place],
+    ["Medium", o.medium],
+    ["Dimensions", o.dimensions],
+    ["Classification", o.classification],
+    ["Credit Line", o.creditLine],
+    ["Object Number", o.accessionNumber],
+    ["Department", o.department],
+    ["On view at", o.GalleryNumber ? `The Met Fifth Avenue in Gallery ${o.GalleryNumber}` : "Not on view"]
+  ].filter(([, v]) => v && String(v).trim());
+  return {
+    id: o.objectID,
+    title: o.title || "Untitled",
+    artist: o.artistDisplayName || "",
+    nationality: o.artistNationality || o.culture || "",
+    date: o.objectDate || "",
+    caption: [o.title, artistLine, o.medium].filter(Boolean).join(", "),
+    curatorial: "", // the Met API does not publish label text
+    image: o.primaryImage || o.primaryImageSmall,
+    thumb: o.primaryImageSmall || o.primaryImage,
+    publicDomain: !!o.isPublicDomain,
+    tags: (o.tags || []).map(t => t.term).filter(Boolean),
+    standard
+  };
+}
+
+const isPainting = o =>
+  /painting/i.test(o.classification || "") || /painting/i.test(o.objectName || "");
+
+// Some filter combinations make the Met's server drop the connection, so if the full
+// query fails, simpler ones are tried; paintings and images are checked on each record anyway.
+const SEARCH_VARIANTS = [
+  { hasImages: "true", medium: "Paintings" },
+  { medium: "Paintings" },
+  { hasImages: "true" },
+  {}
+];
+let searchVariant = 0;         // index of the variant that last worked
+
+async function searchPage(q, offset) {
+  let last;
+  // every variant directly first, then every variant through the relay
+  for (const relay of (useRelay ? [true] : [false, true])) {
+    for (let v = searchVariant; v < SEARCH_VARIANTS.length; v++) {
+      const params = new URLSearchParams({ q, ...SEARCH_VARIANTS[v], offset: String(offset), limit: String(PAGE_SIZE) });
+      try {
+        const data = await metFetch(`${MET_SEARCH}?${params}`, 2, relay);
+        searchVariant = v;
+        if (relay) useRelay = true;
+        return data;
+      } catch (e) { last = e; }
+    }
+  }
+  const e = last || {};
+  throw new Error(e.network
+    ? "The Met\u2019s search didn\u2019t answer this browser, directly or through the relay. Check the connection and try again in a minute."
+    : `The Met\u2019s search answered with status ${e.status}. Try again in a minute.`);
+}
+
+async function search(q) {
+  q = q.trim();
+  if (!q) return;
+  const token = ++searchToken;
+  lastQuery = q;
+  history.replaceState(null, "", "#q=" + encodeURIComponent(q));
+  const status = $("search-status");
+  $("results").innerHTML = "";
+  status.textContent = "Searching paintings\u2026";
+
+  searchVariant = 0;
+  let shown = 0, first = true, offset = 0, total = Infinity;
+  const seen = new Set();
+
+  // page through results, 500 IDs at a time, until 200 paintings with images are on screen
+  while (shown < TARGET_IMAGES && offset < total && offset < MAX_OFFSET) {
+    let page;
+    try { page = await searchPage(q, offset); }
+    catch (e) { if (token === searchToken) status.textContent = shown ? `${shown} paintings` : e.message; return; }
+    if (token !== searchToken) return;
+    total = page.total || 0;
+    const ids = (page.objectIDs || []).filter(id => !seen.has(id));
+    ids.forEach(id => seen.add(id));
+    offset += PAGE_SIZE;
+    if (!ids.length) break;
+
+    let i = 0;
+    const worker = async () => {
+      while (i < ids.length && shown < TARGET_IMAGES) {
+        const id = ids[i++];
+        try {
+          const o = await metJSON(`/objects/${id}`);
+          if (token !== searchToken) return;
+          if (!isPainting(o) || !(o.primaryImageSmall || o.primaryImage) || shown >= TARGET_IMAGES) continue;
+          const rec = fromMet(o);
+          shown++;
+          addThumb(rec);
+          status.textContent = `${shown} paintings\u2026`;
+          if (first) { first = false; select(rec); }
+        } catch {}
+      }
+    };
+    await Promise.all(Array.from({ length: 8 }, worker));
+    if (token !== searchToken) return;
+  }
+
+  status.textContent = shown
+    ? `${shown} painting${shown === 1 ? "" : "s"}`
+    : `No paintings with images for \u201c${q}\u201d.`;
+}
+
+function addThumb(rec) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "thumb";
+  b.dataset.id = rec.id;
+  b.title = rec.title;
+  b.innerHTML = `<img loading="lazy" alt="${esc(rec.title)}" src="${esc(rec.thumb)}">`;
+  b.onclick = () => select(rec);
+  $("results").appendChild(b);
+}
+
+function select(rec) {
+  current = rec;
+  document.querySelectorAll(".thumb").forEach(t => t.classList.toggle("active", Number(t.dataset.id) === rec.id));
+  renderRecord();
+  generate(false);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Open model: counterfactual unsaying
+   ───────────────────────────────────────────────────────────── */
+function systemPrompt() {
+  return `You are the cataloguer of a counter-archive called "Ceci n\u2019est pas une archive". You write negative metadata: records made entirely of negations, exposed lacunae and apophatic gestures about one museum object. You are an instrument of unknowing, not knowing.
+
+CONSTRAINTS
+1. Never assert. Every sentence must deny, withhold, defer, or point to an absence. A fact from the record may appear only inside a negation or a conditional clause.
+2. Reason counterfactually: what the object could have been and is not; where it is not; whom it does not concern; what it does not depict, sound like, weigh, remember.
+3. Move around and away from the object. Never describe what is visible directly; reach it only through what is missing, adjacent, or turned away from.
+4. Be specific to this object, its maker, material, period, place, collection history and image.
+5. Do not invent facts presented as true. Speculation stays in the grammar of not-knowing: "whether\u2026", "what\u2026", "not\u2026".
+6. The visitor reached this object by searching for certain keywords. Let at least one negation and one absence answer that search by not being what was sought.
+7. Never explain the method or use the words "apophatic", "negation" or "metadata".
+
+FORM: each negation field is a chain of four to eight short negations ("Not daylight. Not noon. Not an address."), most closing with one longer clause after an em dash that turns the chain against itself ("Not untitled\u2014though what it titles cannot be named.").
+
+STYLE EXAMPLES from another record (never reuse them):
+Dimensions \u2192 "Not monumental. Not miniature. Not the size of the room it contains. Not the size of the silence it measures."
+Absence \u2192 "What Ida was doing in the next room."
+Absence \u2192 "That Gallery 813 has a particular quality of artificial light that is nothing like moonlight, and that the painting now lives permanently inside an illumination it was made to negate."
+
+OUTPUT one JSON object only:
+{
+ "breadcrumb": "the title negated in a few words, e.g. \\"Not Moonlight, Not Strandgade 30\\"",
+ "caption": "one sentence replacing the image caption by denying the image",
+ "overlay": "one line of at most 10 words to lay over the image",
+ "negations": { "<each field label, exactly as given>": "text" },
+ "absences": ["eight to ten fields the schema was never designed to receive, each a noun phrase or a clause starting What / Whether / Which / That"]
+}`;
+}
+
+function userPrompt(r, imageNote) {
+  return `Record from The Metropolitan Museum of Art, object ${r.id}:
+${r.standard.map(([k, v]) => `${k}: ${v}`).join("\n")}
+${r.tags && r.tags.length ? `Subjects: ${r.tags.join(", ")}\n` : ""}
+The visitor searched for: "${lastQuery || "nothing in particular"}"
+Field labels, in order: ${JSON.stringify(r.standard.map(([k]) => k))}
+${imageNote}
+Return the JSON object now.`;
+}
+
+async function callModel(messages) {
+  const P = settings.p;
+  const headers = { "Content-Type": "application/json" };
+  if (settings.key && !P.keyless) headers.Authorization = "Bearer " + settings.key;
+  Object.assign(headers, P.headers());
+  const body = { model: settings.model, messages, temperature: 0.9, max_tokens: 2500 };
+  let res;
+  try {
+    res = await fetch(P.endpoint, { method: "POST", headers, body: JSON.stringify(body) });
+  } catch {
+    const e = new Error(`${P.name} could not be reached from this browser.`); e.fatal = true; throw e;
+  }
+  if (!res.ok) {
+    let detail = "";
+    try { const j = await res.json(); detail = j?.error?.message || j?.message || ""; } catch {}
+    const e = new Error(
+      res.status === 401 ? `${P.name} rejected the key. Check it under Key.` :
+      res.status === 402 ? `${P.name} reports no credit left on this key.` :
+      res.status === 429 ? `${P.name}\u2019s rate limit was reached. Wait a moment, then unsay again.` :
+      res.status === 404 ? `${P.name} doesn\u2019t offer the model \u201c${settings.model}\u201d. Choose another under Key.` :
+      `${P.name} answered with status ${res.status}.${detail ? " " + String(detail).slice(0, 320) : ""}`);
+    e.fatal = [401, 402, 404, 429].includes(res.status);
+    throw e;
+  }
+  const j = await res.json();
+  let text = j.choices?.[0]?.message?.content || "";
+  if (Array.isArray(text)) text = text.map(c => c.text || "").join("");
+  text = String(text).replace(/```json|```/g, "").trim();
+  const a = text.indexOf("{"), b = text.lastIndexOf("}");
+  if (a < 0 || b <= a) throw new Error("The model\u2019s answer could not be read as a record. Unsay again.");
+  return JSON.parse(text.slice(a, b + 1));
+}
+
+async function generate(force) {
+  const r = current;
+  if (r.id === SEED.id && !force) return;          // the hand-written record
+  if (!force && cachedNeg(r.id)) return;           // already unsaid on this device
+  if (needsKey()) { renderNegative(); return; }
+  if (genState[r.id] === "pending") return;
+
+  const token = ++genToken;
+  genState[r.id] = "pending";
+  if (force) localStorage.removeItem("cnpa:neg:" + r.id);
+  renderNegative();
+
+  const system = { role: "system", content: systemPrompt() };
+  const attempts = r.thumb ? ["image", "text"] : ["text"];
+  let raw = null, imageSeen = false, err = null;
+  for (const how of attempts) {
+    const content = how === "image"
+      ? [{ type: "text", text: userPrompt(r, "The image of the object is attached; look at it in order to write around and away from it.") },
+         imageObj(r.thumb)]
+      : userPrompt(r, "The image could not be shown to you; let the missing image be one more absence.");
+    try { raw = await callModel([system, { role: "user", content }]); imageSeen = how === "image"; break; }
+    catch (e) { err = e; if (e.fatal) break; }
+  }
+
+  if (!raw) {
+    genState[r.id] = err ? err.message : "The record could not be unsaid.";
+    if (current.id === r.id) renderNegative();
+    return;
+  }
+
+  const map = {};
+  Object.entries(raw.negations || {}).forEach(([k, v]) => { map[k.toLowerCase().trim()] = v; });
+  const neg = {
+    breadcrumb: raw.breadcrumb || "Not " + r.title,
+    caption: raw.caption || "Not this image.",
+    overlay: raw.overlay || "Ceci n\u2019est pas une archive.",
+    negations: r.standard.map(([label]) => [label, String(map[label.toLowerCase()] || "Not given. Not withheld either.")]),
+    absences: (raw.absences || []).map(String).filter(Boolean).slice(0, 12),
+    model: settings.model,
+    query: lastQuery,
+    imageSeen
+  };
+  storeNeg(r.id, neg);
+  delete genState[r.id];
+  if (current.id === r.id) { renderNegative(); switchTab(currentTab); }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Key panel, search form, start-up
+   ───────────────────────────────────────────────────────────── */
+function fillKeyPanel(provider) {
+  const P = PROVIDERS[provider];
+  $("key-input").style.display = P.keyless ? "none" : "";
+  $("key-input").value = localStorage.getItem("cnpa:key:" + provider) || SITE_KEYS[provider] || "";
+  $("key-input").placeholder = `${P.name} API key`;
+  $("model-input").value = localStorage.getItem("cnpa:model:" + provider) || P.defaultModel;
+  $("model-list").innerHTML = P.models.map(m => `<option value="${esc(m)}">`).join("");
+  $("key-note").innerHTML = P.keyless
+    ? (P.endpoint ? "Claude runs through this site\u2019s secure proxy. No key is needed here, and none is stored in this page."
+                  : "Claude isn\u2019t connected yet: the site owner sets CLAUDE_PROXY_URL in the page after deploying the proxy.")
+    : `Get a key at ${esc(P.keyHelp)}. It is kept in this browser only and sent only to ${esc(P.name)}. Use a model that accepts images.`;
+}
+function openKey() {
+  $("key-panel").classList.add("open");
+  $("provider-input").value = settings.provider;
+  fillKeyPanel(settings.provider);
+  if (settings.provider === "pollinations") loadPollinationsModels().then(() => fillKeyPanel("pollinations"));
+  $("key-input").focus();
+}
+$("provider-input").onchange = async e => {
+  const v = e.target.value;
+  fillKeyPanel(v);
+  if (v === "pollinations") { await loadPollinationsModels(); if ($("provider-input").value === v) fillKeyPanel(v); }
+};
+$("key-btn").onclick = () => $("key-panel").classList.contains("open") ? $("key-panel").classList.remove("open") : openKey();
+$("key-panel").onsubmit = e => {
+  e.preventDefault();
+  const provider = $("provider-input").value;
+  localStorage.setItem("cnpa:provider", provider);
+  if (!PROVIDERS[provider].keyless) localStorage.setItem("cnpa:key:" + provider, $("key-input").value.trim());
+  const model = $("model-input").value.trim() || PROVIDERS[provider].defaultModel;
+  if (model) localStorage.setItem("cnpa:model:" + provider, model);
+  settings.provider = provider;
+  $("key-panel").classList.remove("open");
+  delete genState[current.id];
+  generate(false);
+  renderNegative();
+};
+
+$("search-form").onsubmit = e => {
+  e.preventDefault();
+  $("q").blur();   // dismiss the iPad keyboard
+  search($("q").value);
+};
+
+// Start with the original record; a link with #q=keywords opens that search instead
+renderRecord();
+const startQ = new URLSearchParams(location.hash.slice(1)).get("q");
+if (startQ) { $("q").value = startQ; search(startQ); }
+</script>
+</body>
+</html>
