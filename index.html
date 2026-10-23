@@ -1198,18 +1198,81 @@ TASK 2: write eight to ten sentences on what is absent from this record.
 Return the JSON object now.`;
 }
 
+// Free models don't always return clean JSON: they wrap it in prose or code fences,
+// add "thinking", leave trailing commas, break lines inside strings, or stop mid-way.
+// This reads whatever record can be recovered.
+function scanAndClose(src) {
+  let out = "", inStr = false, esc = false;
+  const stack = [];
+  for (const ch of src) {
+    if (inStr) {
+      if (esc) { out += ch; esc = false; continue; }
+      if (ch === "\\") { out += ch; esc = true; continue; }
+      if (ch === '"') { inStr = false; out += ch; continue; }
+      if (ch === "\n") { out += "\\n"; continue; }
+      if (ch === "\r" || ch === "\t") { out += " "; continue; }
+      out += ch; continue;
+    }
+    if (ch === '"') { inStr = true; out += ch; continue; }
+    if (ch === "{" || ch === "[") stack.push(ch === "{" ? "}" : "]");
+    if ((ch === "}" || ch === "]") && stack.length) stack.pop();
+    out += ch;
+    if (!stack.length && out.trim().startsWith("{") && ch === "}") return out;   // first complete object
+  }
+  // cut off mid-way: close the open string, drop a dangling key or comma, close brackets
+  if (inStr) out += '"';
+  out = out.replace(/,\s*"[^"]*"\s*:\s*"?[^"]*"?$/, "").replace(/,\s*"[^"]*"\s*:?\s*$/, "").replace(/[,:]\s*$/, "");
+  return out + stack.reverse().join("");
+}
+
+function readRecord(text) {
+  let t = String(text || "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/```(?:json)?/gi, "")
+    .trim();
+  const start = t.indexOf("{");
+  if (start < 0) return null;
+  t = t.slice(start);
+  const candidates = [t, scanAndClose(t)];
+  for (const c of candidates) {
+    for (const variant of [c, c.replace(/,\s*([}\]])/g, "$1")]) {
+      try {
+        const obj = JSON.parse(variant);
+        if (obj && typeof obj === "object" && (obj.negations || obj.absences)) return obj;
+      } catch {}
+    }
+  }
+  return null;
+}
+
+// turn the model's negations into { label: text }, whatever shape it used
+function negationMap(raw) {
+  const out = {};
+  const n = raw.negations;
+  if (Array.isArray(n)) {
+    n.forEach(x => {
+      if (Array.isArray(x)) out[String(x[0]).toLowerCase().trim()] = x[1];
+      else if (x && typeof x === "object") out[String(x.field || x.label || x.name || "").toLowerCase().trim()] = x.text || x.value || x.negation;
+    });
+  } else if (n && typeof n === "object") {
+    Object.entries(n).forEach(([k, v]) => { out[k.toLowerCase().replace(/:$/, "").trim()] = Array.isArray(v) ? v.join(" ") : v; });
+  }
+  return out;
+}
+
 let lastModelUsed = "";
-async function callModel(messages) {
+async function callModel(messages, avoid = new Set()) {
   const key = directKey();
-  const chosen = isFree(settings.model) ? settings.model : settings.models[0];
-  const chain = [chosen, ...settings.models.filter(m => m !== chosen && isFree(m))];
-  let last = null;
+  const pool = settings.models.filter(m => isFree(m) && !avoid.has(m));
+  const chosen = isFree(settings.model) && !avoid.has(settings.model) ? settings.model : (pool[0] || "openrouter/free");
+  const chain = [chosen, ...pool.filter(m => m !== chosen)];
+  let last = null, best = null;   // best: the fullest partial record seen, used if nothing complete arrives
   // the Worker does its own fallbacks; the direct route tries up to three groups of three free models
-  const groups = key ? [chain.slice(0, 3), chain.slice(3, 6), chain.slice(6, 9)].filter(g => g.length) : [[chosen]];
+  const groups = key ? [chain.slice(0, 3), chain.slice(3, 6), chain.slice(6, 9)].filter(g => g.length) : chain.slice(0, 3).map(m => [m]);
   if (key) groups.push(["openrouter/free"]);   // last resort: OpenRouter picks any free model that fits
   for (const group of groups) {
     const headers = { "Content-Type": "application/json" };
-    const body = { model: group[0], messages, temperature: 0.9, max_tokens: 2500 };
+    const body = { model: group[0], messages, temperature: 0.8, max_tokens: 4000 };
     if (key) {
       headers.Authorization = "Bearer " + key;
       headers["HTTP-Referer"] = location.origin && location.origin !== "null" ? location.origin : "https://github.com";
@@ -1224,14 +1287,22 @@ async function callModel(messages) {
       e.fatal = true; throw e;
     }
     if (res.ok) {
-      const j = await res.json();
-      lastModelUsed = j.model || group[0];
+      const j = await res.json().catch(() => ({}));
       let text = j.choices?.[0]?.message?.content || "";
       if (Array.isArray(text)) text = text.map(c => c.text || "").join("");
-      text = String(text).replace(/```json|```/g, "").trim();
-      const a = text.indexOf("{"), b = text.lastIndexOf("}");
-      if (a < 0 || b <= a) throw new Error("The model\u2019s answer could not be read as a record. Unsay again.");
-      return JSON.parse(text.slice(a, b + 1));
+      const record = readRecord(text);
+      if (record) {
+        // complete enough? (most fields negated, and a real list of absences)
+        const got = Object.keys(negationMap(record)).length;
+        const abs = Array.isArray(record.absences) ? record.absences.length : record.absences ? 1 : 0;
+        const complete = got >= Math.ceil(current.standard.length * 0.6) && abs >= 4;
+        if (complete) { lastModelUsed = j.model || group[0]; return record; }
+        if (!best || got + abs > best.score) best = { record, model: j.model || group[0], score: got + abs };
+      }
+      // unreadable answer: remember this model and try the next free one
+      avoid.add(j.model || group[0]); avoid.add(group[0]);
+      last = { status: 422, detail: "" };
+      continue;
     }
     let detail = "";
     try { const j = await res.json(); detail = String(j?.error?.message || j?.message || ""); } catch {}
@@ -1240,11 +1311,13 @@ async function callModel(messages) {
     if (res.status === 401 || res.status === 403 || (res.status === 429 && daily)) break;
     // 404 (model retired), 429 (busy), 5xx: next group
   }
+  if (best) { lastModelUsed = best.model; return best.record; }
   const st = last ? last.status : 0, detail = last ? last.detail : "";
   const e = new Error(
     st === 401 ? "The site\u2019s OpenRouter key was rejected. The site owner needs to check Openrouter_Key in the Worker." :
     st === 429 ? (detail || "The free models are busy or today\u2019s free requests are used up. Try again later.") :
     st === 404 ? "No free vision model is available on OpenRouter right now. Try again later." :
+    st === 422 ? "The free models answered, but not in a form that could be read as a record. Unsay again, or choose another model under Model." :
     (detail || `The free model answered with status ${st}.`));
   e.fatal = [401, 403, 404, 429].includes(st);
   throw e;
@@ -1266,12 +1339,13 @@ async function generate(force) {
   const system = { role: "system", content: systemPrompt() };
   const attempts = r.thumb ? ["image", "text"] : ["text"];
   let raw = null, imageSeen = false, err = null;
+  const avoid = new Set();
   for (const how of attempts) {
     const content = how === "image"
       ? [{ type: "text", text: userPrompt(r, "The image of the object is attached; look at it in order to write around and away from it.") },
          imageObj(r.thumb)]
       : userPrompt(r, "The image could not be shown to you; let the missing image be one more absence.");
-    try { raw = await callModel([system, { role: "user", content }]); imageSeen = how === "image"; break; }
+    try { raw = await callModel([system, { role: "user", content }], avoid); imageSeen = how === "image"; break; }
     catch (e) { err = e; if (e.fatal) break; }
   }
 
@@ -1281,14 +1355,15 @@ async function generate(force) {
     return;
   }
 
-  const map = {};
-  Object.entries(raw.negations || {}).forEach(([k, v]) => { map[k.toLowerCase().trim()] = v; });
+  const map = negationMap(raw);
   const neg = {
     breadcrumb: raw.breadcrumb || "Not " + r.title,
     caption: raw.caption || "Not this image.",
     overlay: raw.overlay || "Ceci n\u2019est pas une archive.",
     negations: r.standard.map(([label]) => [label, String(map[label.toLowerCase()] || "Not given. Not withheld either.")]),
-    absences: (raw.absences || []).map(String).filter(Boolean).slice(0, 12),
+    absences: (Array.isArray(raw.absences) ? raw.absences : typeof raw.absences === "string" ? raw.absences.split(/\n+/) : [])
+      .map(a => String(typeof a === "object" && a ? (a.text || a.absence || Object.values(a)[0] || "") : a).replace(/^\s*[-\u2022\d.]+\s*/, "").trim())
+      .filter(Boolean).slice(0, 12),
     model: lastModelUsed || settings.model,
     query: lastQuery,
     imageSeen
