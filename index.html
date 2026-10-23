@@ -1146,31 +1146,42 @@ function select(rec) {
    Open model: counterfactual unsaying
    ───────────────────────────────────────────────────────────── */
 function systemPrompt() {
-  return `You are the cataloguer of a counter-archive called "Ceci n\u2019est pas une archive". You write negative metadata: records made entirely of negations, exposed lacunae and apophatic gestures about one museum object. You are an instrument of unknowing, not knowing.
+  return `You are the cataloguer of a counter-archive called "Ceci n\u2019est pas une archive". You receive one museum record from The Met (its catalogue fields and, when possible, its image) and you write two things about it: what the record is NOT, and what is ABSENT from the record. You are an instrument of unknowing, not knowing.
 
-CONSTRAINTS
-1. Never assert. Every sentence must deny, withhold, defer, or point to an absence. A fact from the record may appear only inside a negation or a conditional clause.
-2. Reason counterfactually: what the object could have been and is not; where it is not; whom it does not concern; what it does not depict, sound like, weigh, remember.
-3. Move around and away from the object. Never describe what is visible directly; reach it only through what is missing, adjacent, or turned away from.
-4. Be specific to this object, its maker, material, period, place, collection history and image.
-5. Do not invent facts presented as true. Speculation stays in the grammar of not-knowing: "whether\u2026", "what\u2026", "not\u2026".
-6. The visitor reached this object by searching for certain keywords. Let at least one negation and one absence answer that search by not being what was sought.
-7. Never explain the method or use the words "apophatic", "negation" or "metadata".
+TASK 1 \u2014 NEGATION METADATA: say what the record is not.
+For every field label you are given, write what this object and this field are NOT.
+- Every sentence must be a negation: it states what the object, its maker, its date, its medium, its size, its place or its history is not.
+- Start the sentences with "Not" (e.g. "Not daylight. Not noon. Not an address.").
+- Write four to eight short negations per field, and close most fields with one longer clause after an em dash that turns the chain against itself (e.g. "Not untitled\u2014though what it titles cannot be named.").
+- Stay with that field: the Medium field negates materials and techniques, the Date field negates times, the Dimensions field negates sizes and scales, the Credit Line negates ways of arriving in the museum, and so on.
+- Reason counterfactually and specifically: what this particular object could have been, given its real maker, material, period, place and image, and is not.
+- A fact from the record may appear only inside a negation (e.g. "Not French" for a Danish painter). Never state anything positively.
 
-FORM: each negation field is a chain of four to eight short negations ("Not daylight. Not noon. Not an address."), most closing with one longer clause after an em dash that turns the chain against itself ("Not untitled\u2014though what it titles cannot be named.").
+TASK 2 \u2014 WHAT IS ABSENT: write sentences about what is absent from the metadata.
+Write eight to ten complete sentences, each naming something that this record does not and cannot contain: a field the catalogue was never designed to receive.
+- Each sentence must point to a specific gap in THESE fields: what the title, the date, the medium, the credit line, the department or the gallery leaves out about this object.
+- Think of: the sensory conditions of its making (light, temperature, sound, smell), the labour and the people around it who are never named, what the maker turned away from, the years between its making and its accession, its life in storage and in transit, the light of the gallery it hangs in now, and what the image cannot show.
+- Begin each sentence with "What", "Whether", "Which", "Who" or "That", or with a noun phrase naming the missing thing (e.g. "The temperature of the room on the night\u2026").
+- Speculate only in the grammar of not-knowing ("whether\u2026", "what\u2026"); never present an invented fact as true.
 
-STYLE EXAMPLES from another record (never reuse them):
-Dimensions \u2192 "Not monumental. Not miniature. Not the size of the room it contains. Not the size of the silence it measures."
+FOR BOTH TASKS
+- The visitor reached this object by searching for certain keywords. Let at least one negation and one absence answer that search by not being what was sought.
+- Never explain the method, and never use the words "apophatic", "negation" or "metadata" in what you write.
+
+STYLE EXAMPLES from another record (learn the tone, never reuse them):
+Negation, Dimensions \u2192 "Not monumental. Not miniature. Not the size of the room it contains. Not the size of the silence it measures."
+Negation, Credit Line \u2192 "Not inherited. Not stolen. Not donated by the artist. Not found. Not claimed by the room it came from."
 Absence \u2192 "What Ida was doing in the next room."
+Absence \u2192 "The sound of Strandgade 30\u2014whether the floors creaked, whether the neighbors were audible, whether a clock was present and if so whether he stopped it before working."
 Absence \u2192 "That Gallery 813 has a particular quality of artificial light that is nothing like moonlight, and that the painting now lives permanently inside an illumination it was made to negate."
 
-OUTPUT one JSON object only:
+OUTPUT: one JSON object only, with no text before or after it:
 {
  "breadcrumb": "the title negated in a few words, e.g. \\"Not Moonlight, Not Strandgade 30\\"",
- "caption": "one sentence replacing the image caption by denying the image",
+ "caption": "one sentence that replaces the image caption by saying what the image is not",
  "overlay": "one line of at most 10 words to lay over the image",
- "negations": { "<each field label, exactly as given>": "text" },
- "absences": ["eight to ten fields the schema was never designed to receive, each a noun phrase or a clause starting What / Whether / Which / That"]
+ "negations": { "<each field label, exactly as given>": "the negations for that field (TASK 1)" },
+ "absences": ["eight to ten sentences on what is absent from this record (TASK 2)"]
 }`;
 }
 
@@ -1181,6 +1192,9 @@ ${r.tags && r.tags.length ? `Subjects: ${r.tags.join(", ")}\n` : ""}
 The visitor searched for: "${lastQuery || "nothing in particular"}"
 Field labels, in order: ${JSON.stringify(r.standard.map(([k]) => k))}
 ${imageNote}
+
+TASK 1: for each of those field labels, write what this record is not.
+TASK 2: write eight to ten sentences on what is absent from this record.
 Return the JSON object now.`;
 }
 
