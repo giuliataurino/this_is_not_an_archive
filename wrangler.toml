@@ -1,0 +1,15 @@
+# Only needed if you deploy with the command line (wrangler) instead of the dashboard.
+name = "not-an-archive-claude"
+main = "claude-worker.js"
+compatibility_date = "2026-01-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://YOUR-GITHUB-USERNAME.github.io"
+
+# Optional: at most 20 requests per visitor per minute
+[[ratelimits]]
+name = "LIMITER"
+namespace_id = "1001"
+  [ratelimits.simple]
+  limit = 20
+  period = 60
