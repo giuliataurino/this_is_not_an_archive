@@ -502,6 +502,11 @@
     .main { padding-bottom: 80px; }
   }
   @media (hover: none) { .tab-btn:hover { opacity: 1; } }
+  .topbar-left { text-decoration: none; }
+  .search-row .restart-btn {
+    font-weight: 400; color: var(--fg-dim); white-space: nowrap;
+    border-left: 1px solid var(--border); padding-left: 16px;
+  }
 
   /* Credit, always visible at the bottom */
   .bottom-bar {
@@ -524,7 +529,7 @@
 
   <!-- Top bar -->
   <div class="topbar">
-    <span class="topbar-left" id="topbar-title">The Met</span>
+    <a class="topbar-left" id="topbar-title" href="#" onclick="returnToStart(); return false;">The Met</a>
     <span class="topbar-right"><span id="topbar-right"></span><button class="key-btn" id="key-btn" type="button">Key</button></span>
   </div>
 
@@ -557,6 +562,7 @@
     <input id="q" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search for other paintings" aria-label="Search keywords">
     <button type="submit">Search</button>
     <span class="search-status" id="search-status" aria-live="polite"></span>
+    <button type="button" class="restart-btn" id="restart-btn" onclick="returnToStart()" hidden>Back to Moonlight</button>
   </form>
   <div class="results-strip" id="results"></div>
 
@@ -629,9 +635,9 @@ const SITE_KEYS = {
 /* Claude runs through your own Cloudflare Worker (see proxy/claude-worker.js and SETUP.md).
    The Anthropic API key is stored as a secret inside the Worker, never in this file,
    so nothing secret is published on GitHub. Paste the Worker's address here: */
-const CLAUDE_PROXY_URL = "https://not-an-archive.g-taurino.workers.dev/";   // e.g. "https://not-an-archive-claude.yourname.workers.dev"
+const CLAUDE_PROXY_URL = "https://not-an-archive-claude.giulia.workers.dev";   // e.g. "https://not-an-archive-claude.yourname.workers.dev"
 
-const DEFAULT_PROVIDER = CLAUDE_PROXY_URL ? "claude" : "openrouter";
+const DEFAULT_PROVIDER = "claude";   // Claude, through the secure proxy, is always the starting model
 
 const MET = "https://collectionapi.metmuseum.org/public/collection/v1";
 // /v1/search was retired by the Met on 1 October 2026 (it now answers 410);
@@ -684,7 +690,8 @@ const PROVIDERS = {
 const OPEN_FAMILY = /llama|qwen|gemma|deepseek|phi|olmo|glm|kimi|intern/i;
 
 const settings = {
-  provider: PROVIDERS[localStorage.getItem("cnpa:provider")] ? localStorage.getItem("cnpa:provider") : DEFAULT_PROVIDER,
+  // only a choice made in this version's Key panel overrides Claude; older saved choices are ignored
+  provider: PROVIDERS[localStorage.getItem("cnpa:provider:v2")] ? localStorage.getItem("cnpa:provider:v2") : DEFAULT_PROVIDER,
   get p() { return PROVIDERS[this.provider]; },
   get key() { return localStorage.getItem("cnpa:key:" + this.provider) || SITE_KEYS[this.provider] || ""; },
   get model() { return localStorage.getItem("cnpa:model:" + this.provider) || this.p.defaultModel; }
@@ -692,7 +699,7 @@ const settings = {
 const needsKey = () => settings.p.keyless ? !settings.p.endpoint : (!settings.key || !settings.model);
 
 // remove anything left on this device from the earlier Mistral setup
-["cnpa:key", "cnpa:model", "cnpa:key:mistral", "cnpa:model:mistral"].forEach(k => localStorage.removeItem(k));
+["cnpa:key", "cnpa:model", "cnpa:key:mistral", "cnpa:model:mistral", "cnpa:provider"].forEach(k => localStorage.removeItem(k));
 
 // Pollinations: discover which open models are live right now
 async function loadPollinationsModels() {
@@ -789,6 +796,7 @@ function storeNeg(id, neg) {
    ───────────────────────────────────────────────────────────── */
 function renderRecord() {
   const r = current;
+  $("restart-btn").hidden = r.id === SEED.id && !$("results").children.length;
   const img = $("painting");
   img.classList.remove("loaded");
   img.onload = () => img.classList.add("loaded");
@@ -938,10 +946,15 @@ class MetError extends Error {
   constructor(msg, status, network) { super(msg); this.status = status; this.network = network; }
 }
 
+const MET_TIMEOUT_MS = 15000;   // a request that hangs is abandoned and retried
+
 async function fetchOnce(url, relay) {
   let res;
-  try { res = await fetch(relay ? MET_RELAY + encodeURIComponent(url) : url, { cache: "no-store" }); }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), MET_TIMEOUT_MS);
+  try { res = await fetch(relay ? MET_RELAY + encodeURIComponent(url) : url, { signal: ctrl.signal }); }
   catch { throw new MetError("no response", 0, true); }
+  finally { clearTimeout(timer); }
   if (!res.ok) throw new MetError(`status ${res.status}`, res.status, false);
   const text = await res.text();
   let data;
@@ -973,30 +986,45 @@ async function metFetch(url, tries = 3, only) {
   throw last;
 }
 
+const objectCache = new Map();   // objectID -> promise of the Met record
+function getObject(id) {
+  if (!objectCache.has(id)) {
+    objectCache.set(id, metJSON(`/objects/${id}`).catch(e => { objectCache.delete(id); throw e; }));
+  }
+  return objectCache.get(id);
+}
+
 async function metJSON(path, tries = 3) {
   return metFetch(MET + path, tries);
 }
 
+const https = u => (u ? String(u).replace(/^http:\/\//, "https://") : "");
+
 function fromMet(o) {
   const artistLine = o.artistDisplayName
-    ? o.artistDisplayName + (o.artistDisplayBio ? ` (${o.artistDisplayBio})` : "")
+    ? `${o.artistPrefix ? o.artistPrefix + " " : ""}${o.artistDisplayName}${o.artistDisplayBio ? ` (${o.artistDisplayBio})` : ""}`
     : "";
-  const place = [o.city, o.region, o.country].filter(Boolean).join(", ");
+  const place = [o.city, o.state, o.county, o.region, o.subregion, o.country].filter(Boolean).join(", ");
+  const tags = (o.tags || []).map(t => t && t.term).filter(Boolean);
   const standard = [
     ["Title", o.title],
     ["Artist", artistLine],
+    ["Object Type", o.objectName && !/^paintings?$/i.test(o.objectName) ? o.objectName : ""],
     ["Culture", o.culture],
     ["Period", o.period],
+    ["Dynasty", o.dynasty],
     ["Date", o.objectDate],
-    ["Geography", place],
+    ["Geography", place ? (o.geographyType ? `${o.geographyType} ${place}` : place) : ""],
     ["Medium", o.medium],
     ["Dimensions", o.dimensions],
     ["Classification", o.classification],
+    ["Subjects", tags.join(", ")],
     ["Credit Line", o.creditLine],
     ["Object Number", o.accessionNumber],
     ["Department", o.department],
+    ["Rights", o.rightsAndReproduction],
     ["On view at", o.GalleryNumber ? `The Met Fifth Avenue in Gallery ${o.GalleryNumber}` : "Not on view"]
-  ].filter(([, v]) => v && String(v).trim());
+  ].filter(([, v]) => v && String(v).trim()).map(([k, v]) => [k, String(v).trim()]);
   return {
     id: o.objectID,
     title: o.title || "Untitled",
@@ -1005,10 +1033,11 @@ function fromMet(o) {
     date: o.objectDate || "",
     caption: [o.title, artistLine, o.medium].filter(Boolean).join(", "),
     curatorial: "", // the Met API does not publish label text
-    image: o.primaryImage || o.primaryImageSmall,
-    thumb: o.primaryImageSmall || o.primaryImage,
+    image: https(o.primaryImage || o.primaryImageSmall),
+    thumb: https(o.primaryImageSmall || o.primaryImage),
     publicDomain: !!o.isPublicDomain,
-    tags: (o.tags || []).map(t => t.term).filter(Boolean),
+    url: o.objectURL || `https://www.metmuseum.org/art/collection/search/${o.objectID}`,
+    tags,
     standard
   };
 }
@@ -1046,19 +1075,23 @@ async function searchPage(q, offset) {
     : `The Met\u2019s search answered with status ${e.status}. Try again in a minute.`);
 }
 
-async function search(q) {
+async function search(q, opts = {}) {
   q = q.trim();
   if (!q) return;
   const token = ++searchToken;
   lastQuery = q;
-  history.replaceState(null, "", "#q=" + encodeURIComponent(q));
+  const h = new URLSearchParams({ q });
+  if (opts.keepSelection && current.id !== SEED.id) h.set("id", current.id);
+  history.replaceState(null, "", "#" + h);
   const status = $("search-status");
   $("results").innerHTML = "";
+  $("restart-btn").hidden = false;
   status.textContent = "Searching paintings\u2026";
 
   searchVariant = 0;
-  let shown = 0, first = true, offset = 0, total = Infinity;
+  let shown = 0, first = !opts.keepSelection, offset = 0, total = Infinity;
   const seen = new Set();
+  const rankOf = new Map();   // keeps thumbnails in the Met's relevance order
 
   // page through results, 500 IDs at a time, until 200 paintings with images are on screen
   while (shown < TARGET_IMAGES && offset < total && offset < MAX_OFFSET) {
@@ -1068,7 +1101,7 @@ async function search(q) {
     if (token !== searchToken) return;
     total = page.total || 0;
     const ids = (page.objectIDs || []).filter(id => !seen.has(id));
-    ids.forEach(id => seen.add(id));
+    ids.forEach(id => { seen.add(id); rankOf.set(id, rankOf.size); });
     offset += PAGE_SIZE;
     if (!ids.length) break;
 
@@ -1077,14 +1110,16 @@ async function search(q) {
       while (i < ids.length && shown < TARGET_IMAGES) {
         const id = ids[i++];
         try {
-          const o = await metJSON(`/objects/${id}`);
+          const rank = rankOf.get(id);
+          const o = await getObject(id);
           if (token !== searchToken) return;
           if (!isPainting(o) || !(o.primaryImageSmall || o.primaryImage) || shown >= TARGET_IMAGES) continue;
           const rec = fromMet(o);
           shown++;
-          addThumb(rec);
+          addThumb(rec, rank);
           status.textContent = `${shown} paintings\u2026`;
           if (first) { first = false; select(rec); }
+          if (rec.id === current.id) document.querySelectorAll(".thumb").forEach(t => t.classList.toggle("active", Number(t.dataset.id) === current.id));
         } catch {}
       }
     };
@@ -1097,19 +1132,39 @@ async function search(q) {
     : `No paintings with images for \u201c${q}\u201d.`;
 }
 
-function addThumb(rec) {
+function addThumb(rec, rank = 0) {
   const b = document.createElement("button");
+  b.dataset.rank = rank;
   b.type = "button";
   b.className = "thumb";
   b.dataset.id = rec.id;
   b.title = rec.title;
   b.innerHTML = `<img loading="lazy" alt="${esc(rec.title)}" src="${esc(rec.thumb)}">`;
   b.onclick = () => select(rec);
-  $("results").appendChild(b);
+  const strip = $("results");
+  const after = [...strip.children].find(t => Number(t.dataset.rank) > rank);
+  strip.insertBefore(b, after || null);
+}
+
+// Back to the opening page: Moonlight, Strandgade 30, Artwork Details, no search
+function returnToStart() {
+  ++searchToken;                       // stop any search still loading
+  $("results").innerHTML = "";
+  $("search-status").textContent = "";
+  $("q").value = "";
+  lastQuery = "";
+  currentTab = "standard";
+  current = SEED;
+  renderRecord();
+  history.replaceState(null, "", location.pathname + location.search);
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function select(rec) {
   current = rec;
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (rec.id === SEED.id) h.delete("id"); else h.set("id", rec.id);
+  history.replaceState(null, "", h.toString() ? "#" + h : location.pathname + location.search);
   document.querySelectorAll(".thumb").forEach(t => t.classList.toggle("active", Number(t.dataset.id) === rec.id));
   renderRecord();
   generate(false);
@@ -1268,7 +1323,7 @@ $("key-btn").onclick = () => $("key-panel").classList.contains("open") ? $("key-
 $("key-panel").onsubmit = e => {
   e.preventDefault();
   const provider = $("provider-input").value;
-  localStorage.setItem("cnpa:provider", provider);
+  localStorage.setItem("cnpa:provider:v2", provider);
   if (!PROVIDERS[provider].keyless) localStorage.setItem("cnpa:key:" + provider, $("key-input").value.trim());
   const model = $("model-input").value.trim() || PROVIDERS[provider].defaultModel;
   if (model) localStorage.setItem("cnpa:model:" + provider, model);
@@ -1287,8 +1342,17 @@ $("search-form").onsubmit = e => {
 
 // Start with the original record; a link with #q=keywords opens that search instead
 renderRecord();
-const startQ = new URLSearchParams(location.hash.slice(1)).get("q");
-if (startQ) { $("q").value = startQ; search(startQ); }
+(async () => {
+  const h = new URLSearchParams(location.hash.slice(1));
+  const startQ = h.get("q"), startId = Number(h.get("id"));
+  if (startId && startId !== SEED.id) {
+    try {
+      const o = await getObject(startId);
+      if (isPainting(o) && (o.primaryImageSmall || o.primaryImage)) { lastQuery = startQ || ""; select(fromMet(o)); }
+    } catch {}
+  }
+  if (startQ) { $("q").value = startQ; search(startQ, { keepSelection: !!startId }); }
+})();
 </script>
 </body>
 </html>
