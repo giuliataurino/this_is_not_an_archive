@@ -537,7 +537,6 @@
   <!-- Model key panel -->
   <form class="key-panel" id="key-panel">
     <select id="model-input" aria-label="Free model"></select>
-    <input id="key-input" type="password" placeholder="OpenRouter key (optional, this device only)" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="OpenRouter key">
     <button type="submit">Save</button>
     <span class="note" id="key-note"></span>
   </form>
@@ -620,13 +619,13 @@
    (proxy/llm-worker.js). The OpenRouter key is a secret inside the Worker;
    this page holds no key and cannot call any paid model.
    ───────────────────────────────────────────────────────────── */
-const PROXY_URL = "https://not-an-archive.g-taurino.workers.dev/";
+const PROXY_URL = "https://not-an-archive.g-taurino.workers.dev";
 
-/* Direct use: if an OpenRouter key is entered under "Model", this browser calls
-   OpenRouter itself with that key (free models only). The key is kept in this
-   device's browser storage, never in this file, so it is not published on GitHub. */
+/* The page never asks for or holds a key: it always connects to the Worker above,
+   which adds the OpenRouter key (stored as a Cloudflare secret) and calls free models only. */
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const directKey = () => (localStorage.getItem("cnpa:openrouter-key") || "").trim();
+const directKey = () => "";   // keys are never asked for: every request goes through the Worker
+localStorage.removeItem("cnpa:openrouter-key");
 
 // free vision models, in order of preference (the Worker's own list replaces this when it answers)
 const FREE_MODELS = [
@@ -634,7 +633,7 @@ const FREE_MODELS = [
   "qwen/qwen2.5-vl-72b-instruct:free",
   "google/gemma-3-27b-it:free",
   "meta-llama/llama-4-scout:free",
-  "openrouter/free"
+  "openrouter/free"          // OpenRouter's own free picker: always last, always available
 ];
 const isFree = id => /:free$/.test(id) || id === "openrouter/free";
 
@@ -660,17 +659,29 @@ const settings = {
 // Ask the Worker which free models it offers, so the page and the Worker always agree
 let proxyInfo = null;
 async function loadProxyInfo() {
-  if (!PROXY_URL || proxyInfo) return proxyInfo;
+  if (proxyInfo) return proxyInfo;
+  // 1. the Worker's live list of free vision models
+  if (PROXY_URL) {
+    try {
+      const j = await (await fetch(PROXY_URL)).json();
+      const free = (Array.isArray(j.models) ? j.models : []).filter(isFree);
+      if (free.length) { settings.models = free; proxyInfo = j; return proxyInfo; }
+    } catch {}
+  }
+  // 2. otherwise ask OpenRouter directly which free models accept images right now
   try {
-    const j = await (await fetch(PROXY_URL)).json();
-    proxyInfo = j;
-    const free = (Array.isArray(j.models) ? j.models : []).filter(isFree);
-    if (free.length) settings.models = free;
+    const j = await (await fetch("https://openrouter.ai/api/v1/models")).json();
+    const live = (j.data || []).filter(m => /:free$/.test(m.id) &&
+      ((m.architecture?.input_modalities || []).includes("image") || /image/.test(m.architecture?.modality || ""))).map(m => m.id);
+    if (live.length) {
+      settings.models = [...FREE_MODELS.filter(id => live.includes(id)), ...live.filter(id => !FREE_MODELS.includes(id)), "openrouter/free"];
+      proxyInfo = { models: settings.models };
+    }
   } catch {}
   return proxyInfo;
 }
 
-const needsKey = () => !PROXY_URL && !directKey();
+const needsKey = () => false;   // always connected through the Worker
 
 // clear choices saved by earlier versions (other providers, keys, paid models)
 Object.keys(localStorage).filter(k => /^cnpa:(key|provider|model)(:|$)/.test(k) && k !== "cnpa:model:free")
@@ -802,7 +813,7 @@ function renderNegative() {
     const st = genState[current.id];
     let html;
     if (st === "pending") html = `<p class="gen-note pulse">Unsaying the record\u2026</p>`;
-    else if (needsKey()) html = `<p class="gen-note">To unsay this record, add an OpenRouter key under Model.<button type="button" onclick="openKey()">Add key</button></p>`;
+    else if (needsKey()) html = `<p class="gen-note">The free model isn\u2019t connected.</p>`;
     else html = `<p class="gen-note">${st ? esc(st) : "This record has not been unsaid yet."}<button type="button" onclick="generate(true)">Unsay this record</button></p>`;
     negPanel.innerHTML = html;
     absPanel.appendChild(heading);
@@ -1175,44 +1186,54 @@ Return the JSON object now.`;
 
 let lastModelUsed = "";
 async function callModel(messages) {
-  const P = { name: "The free model" };
   const key = directKey();
-  const headers = { "Content-Type": "application/json" };
-  const model = isFree(settings.model) ? settings.model : FREE_MODELS[0];
-  const body = { model, messages, temperature: 0.9, max_tokens: 2500 };
-  if (key) {
-    // straight to OpenRouter with this device's key; free models only, with free fallbacks
-    headers.Authorization = "Bearer " + key;
-    headers["HTTP-Referer"] = location.origin && location.origin !== "null" ? location.origin : "https://github.com";
-    headers["X-Title"] = "This Is Not an Archive";
-    body.models = [model, ...settings.models.filter(m => m !== model && isFree(m))].slice(0, 3);
-  }
-  let res;
-  try {
-    res = await fetch(key ? OPENROUTER_URL : PROXY_URL, { method: "POST", headers, body: JSON.stringify(body) });
-  } catch {
-    const e = new Error(`${P.name} could not be reached from this browser.`); e.fatal = true; throw e;
-  }
-  if (!res.ok) {
+  const chosen = isFree(settings.model) ? settings.model : settings.models[0];
+  const chain = [chosen, ...settings.models.filter(m => m !== chosen && isFree(m))];
+  let last = null;
+  // the Worker does its own fallbacks; the direct route tries up to three groups of three free models
+  const groups = key ? [chain.slice(0, 3), chain.slice(3, 6), chain.slice(6, 9)].filter(g => g.length) : [[chosen]];
+  if (key) groups.push(["openrouter/free"]);   // last resort: OpenRouter picks any free model that fits
+  for (const group of groups) {
+    const headers = { "Content-Type": "application/json" };
+    const body = { model: group[0], messages, temperature: 0.9, max_tokens: 2500 };
+    if (key) {
+      headers.Authorization = "Bearer " + key;
+      headers["HTTP-Referer"] = location.origin && location.origin !== "null" ? location.origin : "https://github.com";
+      headers["X-Title"] = "This Is Not an Archive";
+      body.models = group;
+    }
+    let res;
+    try {
+      res = await fetch(key ? OPENROUTER_URL : PROXY_URL, { method: "POST", headers, body: JSON.stringify(body) });
+    } catch {
+      const e = new Error(key ? "OpenRouter could not be reached from this browser." : "The site\u2019s proxy could not be reached. Check the connection and try again.");
+      e.fatal = true; throw e;
+    }
+    if (res.ok) {
+      const j = await res.json();
+      lastModelUsed = j.model || group[0];
+      let text = j.choices?.[0]?.message?.content || "";
+      if (Array.isArray(text)) text = text.map(c => c.text || "").join("");
+      text = String(text).replace(/```json|```/g, "").trim();
+      const a = text.indexOf("{"), b = text.lastIndexOf("}");
+      if (a < 0 || b <= a) throw new Error("The model\u2019s answer could not be read as a record. Unsay again.");
+      return JSON.parse(text.slice(a, b + 1));
+    }
     let detail = "";
-    try { const j = await res.json(); detail = j?.error?.message || j?.message || ""; } catch {}
-    const e = new Error(
-      res.status === 401 ? (directKey() ? "OpenRouter rejected the key entered under Model. Check it, or clear it to use the site\u2019s proxy." : "The site\u2019s OpenRouter key was rejected. The site owner needs to check Openrouter_Key in the Worker.") :
-      res.status === 402 ? `${P.name} reports no credit left on this key.` :
-      res.status === 429 ? (detail || "The free models are busy or today\u2019s free requests are used up. Try again later.") :
-      res.status === 404 ? `The free model \u201c${settings.model}\u201d isn\u2019t available right now. Choose another under Model.` :
-      `${P.name} answered with status ${res.status}.${detail ? " " + String(detail).slice(0, 320) : ""}`);
-    e.fatal = [401, 402, 404, 429].includes(res.status);
-    throw e;
+    try { const j = await res.json(); detail = String(j?.error?.message || j?.message || ""); } catch {}
+    last = { status: res.status, detail };
+    const daily = /per-day|per day|daily|used up/i.test(detail);
+    if (res.status === 401 || res.status === 403 || (res.status === 429 && daily)) break;
+    // 404 (model retired), 429 (busy), 5xx: next group
   }
-  const j = await res.json();
-  lastModelUsed = j.model || settings.model;
-  let text = j.choices?.[0]?.message?.content || "";
-  if (Array.isArray(text)) text = text.map(c => c.text || "").join("");
-  text = String(text).replace(/```json|```/g, "").trim();
-  const a = text.indexOf("{"), b = text.lastIndexOf("}");
-  if (a < 0 || b <= a) throw new Error("The model\u2019s answer could not be read as a record. Unsay again.");
-  return JSON.parse(text.slice(a, b + 1));
+  const st = last ? last.status : 0, detail = last ? last.detail : "";
+  const e = new Error(
+    st === 401 ? "The site\u2019s OpenRouter key was rejected. The site owner needs to check Openrouter_Key in the Worker." :
+    st === 429 ? (detail || "The free models are busy or today\u2019s free requests are used up. Try again later.") :
+    st === 404 ? "No free vision model is available on OpenRouter right now. Try again later." :
+    (detail || `The free model answered with status ${st}.`));
+  e.fatal = [401, 403, 404, 429].includes(st);
+  throw e;
 }
 
 async function generate(force) {
@@ -1269,10 +1290,7 @@ async function generate(force) {
 function fillModelPanel() {
   $("model-input").innerHTML = settings.models.map(m =>
     `<option value="${esc(m)}"${m === settings.model ? " selected" : ""}>${esc(m === "openrouter/free" ? "Any free vision model (OpenRouter picks)" : m.replace(/:free$/, ""))}</option>`).join("");
-  $("key-input").value = directKey();
-  $("key-note").innerHTML = "Only free OpenRouter models are used, so nothing is ever charged. " +
-    (PROXY_URL ? "Leave the key empty to use this site\u2019s secure proxy. " : "") +
-    "A key entered here is used directly by this browser and kept only on this device; it is never written into the page or GitHub. If the chosen model is busy, the next free one answers.";
+  $("key-note").innerHTML = "Only free OpenRouter models are used, so nothing is ever charged. They run through this site\u2019s secure connection; no key is needed. If the chosen model is busy, the next free one answers.";
 }
 async function openKey() {
   $("key-panel").classList.add("open");
@@ -1285,8 +1303,6 @@ $("key-panel").onsubmit = e => {
   e.preventDefault();
   const model = $("model-input").value;
   if (isFree(model)) localStorage.setItem("cnpa:model:free", model);
-  const key = $("key-input").value.trim();
-  if (key) localStorage.setItem("cnpa:openrouter-key", key); else localStorage.removeItem("cnpa:openrouter-key");
   $("key-panel").classList.remove("open");
   delete genState[current.id];
   generate(false);
