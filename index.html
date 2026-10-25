@@ -685,7 +685,7 @@ async function loadProxyInfo() {
   return proxyInfo;
 }
 
-const WORKER_VERSION_NEEDED = 5;
+const WORKER_VERSION_NEEDED = 7;
 const workerIsOld = () => proxyInfo && !(Number(proxyInfo.version) >= WORKER_VERSION_NEEDED);
 const needsKey = () => false;   // always connected through the Worker
 
@@ -830,75 +830,73 @@ function renderRecord() {
   switchTab(currentTab);
 }
 
+function partStatus(part) {
+  const st = partState[partKey(current.id, part)];
+  if (st === "pending") {
+    return `<p class="gen-note pulse">${part === "negation" ? "Unsaying the record\u2026" : "Listening for what the record cannot carry\u2026"}</p>`;
+  }
+  if (st && st.waitUntil) {
+    const left = () => { const s = Math.max(0, Math.ceil((st.waitUntil - Date.now()) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+    clearInterval(countdownTimer);
+    countdownTimer = setInterval(() => {
+      const now = partState[partKey(current.id, part)];
+      if (!now || !now.waitUntil) return clearInterval(countdownTimer);
+      document.querySelectorAll(`.countdown[data-part="${part}"]`).forEach(el => { el.textContent = left(); });
+    }, 1000);
+    return `<p class="gen-note">${esc(st.reason)} Trying again in <span class="countdown" data-part="${part}">${left()}</span>.<button type="button" onclick="unsayClicked('${part}', ${st.force ? "true" : "false"})">Try now</button></p>`;
+  }
+  const intro = part === "negation"
+    ? "The negation metadata of this record has not been written yet."
+    : "What is absent from this record has not been written yet.";
+  return `<p class="gen-note">${st ? esc(st) : intro}<button type="button" onclick="unsayClicked('${part}', false)">Unsay this record</button></p>`;
+}
+
+function partFoot(neg, part) {
+  if (neg.authored) return "";
+  const model = (part === "negation" ? neg.negModel : neg.absModel) || neg.model || "an open model";
+  return `<div class="gen-foot"><span>Unsaid by ${esc(model)}${neg.query ? ` after a search for \u201c${esc(neg.query)}\u201d` : ""}.</span><button type="button" onclick="unsayClicked('${part}', true)">Unsay again</button></div>`;
+}
+
 function renderNegative() {
   const neg = cachedNeg(current.id);
   const negPanel = $("panel-negation");
   const absPanel = $("panel-absence");
   negPanel.innerHTML = "";
   absPanel.innerHTML = "";
+  clearInterval(countdownTimer);
 
+  // Negation Metadata
+  if (partDone(neg, "negation")) {
+    if (partState[partKey(current.id, "negation")]) negPanel.insertAdjacentHTML("beforeend", partStatus("negation"));
+    neg.negations.forEach(([label, raw], i) => {
+      const value = neg.authored ? raw : fiveNegations(raw);
+      const row = document.createElement("div");
+      row.className = "neg-row";
+      row.innerHTML = `<span class="neg-label" style="animation-delay:${i * 0.08}s">${esc(label)}:</span><span class="neg-value" style="animation-delay:${i * 0.08 + 0.15}s">${esc(value)}</span>`;
+      negPanel.appendChild(row);
+    });
+    negPanel.insertAdjacentHTML("beforeend", partFoot(neg, "negation"));
+  } else {
+    negPanel.innerHTML = partStatus("negation");
+  }
+
+  // What Is Absent
   const heading = document.createElement("p");
   heading.className = "absence-heading";
   heading.textContent = "Fields the schema was never designed to receive";
-
-  if (!neg) {
-    const st = genState[current.id];
-    let html;
-    clearInterval(countdownTimer);
-    if (st === "pending") html = `<p class="gen-note pulse">Unsaying the record\u2026</p>`;
-    else if (st && st.waitUntil) {
-      const left = () => { const s = Math.max(0, Math.ceil((st.waitUntil - Date.now()) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
-      html = `<p class="gen-note">${esc(st.reason)} Trying again in <span class="countdown">${left()}</span>.<button type="button" onclick="unsayClicked(${st.force ? "true" : "false"}, true)">Try now</button></p>`;
-      countdownTimer = setInterval(() => {
-        if (!genState[current.id] || !genState[current.id].waitUntil) return clearInterval(countdownTimer);
-        document.querySelectorAll(".countdown").forEach(el => { el.textContent = left(); });
-      }, 1000);
-    }
-    else if (needsKey()) html = `<p class="gen-note">The free model isn\u2019t connected.</p>`;
-    else html = `<p class="gen-note">${st ? esc(st) : "This record has not been unsaid yet."}<button type="button" onclick="unsayClicked(false)">Unsay this record</button></p>`;
-    negPanel.innerHTML = html;
-    absPanel.appendChild(heading);
-    absPanel.insertAdjacentHTML("beforeend", html);
-    return;
-  }
-
-  neg.negations.forEach(([label, value], i) => {
-    const row = document.createElement("div");
-    row.className = "neg-row";
-    row.innerHTML = `<span class="neg-label" style="animation-delay:${i * 0.08}s">${esc(label)}:</span><span class="neg-value" style="animation-delay:${i * 0.08 + 0.15}s">${esc(value)}</span>`;
-    negPanel.appendChild(row);
-  });
-
   absPanel.appendChild(heading);
-  if (!neg.absences.length) {
-    if (neg.absencePending) {
-      absPanel.insertAdjacentHTML("beforeend", `<p class="gen-note pulse">Listening for what the record cannot carry\u2026</p>`);
-    } else if (neg.absenceRetryAt && neg.absenceRetryAt > Date.now()) {
-      const left = () => { const s = Math.max(0, Math.ceil((neg.absenceRetryAt - Date.now()) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
-      absPanel.insertAdjacentHTML("beforeend", `<p class="gen-note">${esc(neg.absenceError || "")} Trying again in <span class="countdown">${left()}</span>.<button type="button" onclick="absenceClicked()">Try now</button></p>`);
-      clearInterval(countdownTimer);
-      countdownTimer = setInterval(() => {
-        const n = cachedNeg(current.id);
-        if (!n || !n.absenceRetryAt) return clearInterval(countdownTimer);
-        document.querySelectorAll(".countdown").forEach(el => { el.textContent = left(); });
-      }, 1000);
-    } else {
-      absPanel.insertAdjacentHTML("beforeend", `<p class="gen-note">${esc(neg.absenceError || "What is absent hasn\u2019t been written for this record yet.")}<button type="button" onclick="absenceClicked()">Ask again</button></p>`);
-    }
-  }
-  const shownAbsences = neg.authored ? neg.absences : fiveSentences(neg.absences);
-  shownAbsences.forEach((text, i) => {
-    const p = document.createElement("p");
-    p.className = "absence-item";
-    p.style.animationDelay = `${i * 0.12}s`;
-    p.textContent = text;
-    absPanel.appendChild(p);
-  });
-
-  if (!neg.authored) {
-    const foot = `<div class="gen-foot"><span>Unsaid by ${esc(neg.model || "an open model")}${neg.query ? ` after a search for \u201c${esc(neg.query)}\u201d` : ""}${neg.imageSeen === true ? ", with the image" : ""}.</span><button type="button" onclick="unsayClicked(true)">Unsay again</button></div>`;
-    negPanel.insertAdjacentHTML("beforeend", foot);
-    absPanel.insertAdjacentHTML("beforeend", foot);
+  if (partDone(neg, "absence")) {
+    if (partState[partKey(current.id, "absence")]) absPanel.insertAdjacentHTML("beforeend", partStatus("absence"));
+    (neg.authored ? neg.absences : fiveSentences(neg.absences)).forEach((text, i) => {
+      const p = document.createElement("p");
+      p.className = "absence-item";
+      p.style.animationDelay = `${i * 0.12}s`;
+      p.textContent = text;
+      absPanel.appendChild(p);
+    });
+    absPanel.insertAdjacentHTML("beforeend", partFoot(neg, "absence"));
+  } else {
+    absPanel.insertAdjacentHTML("beforeend", partStatus("absence"));
   }
 }
 
@@ -1215,11 +1213,16 @@ const metadataLines = r => r.standard.map(([k, v]) => `${k}: ${v}`).join("\n");
 function negationPrompt(r) {
   const system = `Counter-archive "Ceci n\u2019est pas une archive".
 Metadata = THIS. Negative metadata = NOT THAT.
-For each field below, write what its value is NOT: 4\u20136 short sentences starting "Not", each something that value excludes (another date, material, size, maker, nationality, place, department, way of entering a museum). End most fields with one longer em-dash clause that turns against the chain. Never state anything positively. Be specific to this painting. Never write the words negation, metadata or apophatic.
-Example \u2014 Date: 1900\u20131906 \u2192 "Not 1899. Not 1907. Not a single year. Not dated with certainty\u2014six years of not finishing or not beginning."
+Below are a painting's catalogue fields from The Met's collection API. For EACH field, read its actual value and write what that value is NOT, by naming the alternatives it excludes:
+- Nationality or culture: other nationalities (French \u2192 "Not Spanish. Not Italian. Not Dutch.").
+- Date: other dates and periods (1900\u20131906 \u2192 "Not 1899. Not the 1950s. Not medieval.").
+- Medium: other materials and techniques (Oil on canvas \u2192 "Not watercolor. Not fresco. Not marble.").
+- Dimensions: other sizes and scales. Title, Artist, Place, Department, Credit Line, Gallery: other titles, makers, places, departments, ways of entering a museum, rooms.
+RULES: at most 5 negations per field, each a short sentence starting "Not". Every negation must follow from that field's actual value. Never state anything positively. Never write the words negation, metadata or apophatic.
 Reply with JSON only:
-{"breadcrumb":"title negated, few words","caption":"one sentence: what the image is not","overlay":"\u226410 words","negations":{"<field label>":"text"}}`;
-  const user = `${metadataLines(r)}
+{"breadcrumb":"title negated, few words","caption":"one sentence: what the image is not","overlay":"\u226410 words","negations":{"<field label>":"Not \u2026. Not \u2026."}}`;
+  const user = `METADATA (THIS):
+${metadataLines(r)}
 ${searchNote()}
 JSON keys for negations: ${JSON.stringify(r.standard.map(([k]) => k))}`;
   return [system, user];
@@ -1227,15 +1230,16 @@ JSON keys for negations: ${JSON.stringify(r.standard.map(([k]) => k))}`;
 
 function absencePrompt(r) {
   const system = `Counter-archive "Ceci n\u2019est pas une archive". Section: "Fields the schema was never designed to receive".
-Read the painting's catalogue metadata below (from The Met's collection API). Write exactly 5 sentences, one per line, each naming something this metadata cannot hold: a field the schema was never designed to receive.
-Anchor each sentence in a specific field and its actual value (title, artist, date, medium, dimensions, credit line, accession year, gallery\u2026) and say what that field leaves out: the conditions of making, unnamed people and labour, what the painter turned away from, the years before the museum, storage, the light it hangs in now.
-Begin each sentence with What, Whether, Which, Who or That, or with a noun phrase. Invent no facts; speculate only as "whether\u2026" or "what\u2026". Never write the words negation, metadata or apophatic.
-Example line: What Ida was doing in the next room.
-Reply with the 5 lines only: no numbering, no title, no other text.`;
+Read the painting's catalogue fields below (from The Met's collection API). Write up to 10 sentences, one per line, each naming something this record does not and cannot hold. Mix two kinds, about half each:
+1. DESCRIPTIVE gaps: what the fields (title, artist, date, medium, dimensions, classification\u2026) leave out about the painting itself: the conditions of its making, the people and labour around it, what the painter turned away from, what no description of its surface can carry.
+2. PROVENANCE and EXHIBITION gaps: what the record does not say about the painting\u2019s life after it was made: who owned it before the museum and how it passed between them, sales, gaps in its chain of ownership, the years between its making and its Accession Year, how the Credit Line hides those hands, where it was exhibited or lent, who saw it, its time in storage, the rooms it hung in before its current gallery.
+Anchor each sentence in a specific field and its value where possible. Begin with What, Whether, Which, Who or That, or with a noun phrase. Invent no facts (no owners, sales or exhibitions that are not in the record); speculate only as "whether\u2026" or "what\u2026". Never write the words negation, metadata or apophatic.
+Example lines: What Ida was doing in the next room. / Whose walls it hung on between 1906 and its accession, and in which light.
+Reply with the lines only: no numbering, no headings, no other text.`;
   const user = `METADATA:
 ${metadataLines(r)}
 ${r.tags && r.tags.length ? `Subjects: ${r.tags.join(", ")}\n` : ""}${searchNote()}
-Write the 5 lines now.`;
+Write up to 10 lines now, mixing descriptive gaps with provenance and exhibition gaps.`;
   return [system, user];
 }
 
@@ -1323,7 +1327,7 @@ function readRecord(text, part = "negation", labels = []) {
 
 // turn the model's negations into { label: text }, whatever shape it used
 // Split into sentences and keep the first five
-const MAX_ABSENCES = 5;
+const MAX_ABSENCES = 10;   // What Is Absent: up to ten sentences
 function fiveSentences(items) {
   const out = [];
   for (const item of items) {
@@ -1331,6 +1335,14 @@ function fiveSentences(items) {
     for (const p of parts) { if (out.length < MAX_ABSENCES) out.push(p); }
   }
   return out;
+}
+
+// At most five negations per field
+const MAX_NEGATIONS = 5;
+function fiveNegations(text) {
+  const parts = String(Array.isArray(text) ? text.join(" ") : text || "")
+    .split(/(?<=[.!?\u2026])\s+(?=[A-Z\u201c"\u2018'(])/).map(x => x.trim()).filter(Boolean);
+  return parts.slice(0, MAX_NEGATIONS).join(" ");
 }
 
 function negationMap(raw) {
@@ -1349,8 +1361,8 @@ function negationMap(raw) {
 
 let lastModelUsed = "";
 let generateFresh = false;   // true while "Unsay again" asks for a new version
-async function callModel(messages, avoid = new Set(), part = "negation") {
-  if (!tapped.has(current.id)) { const e = new Error("Tap \u201cUnsay this record\u201d to ask the model."); e.fatal = true; throw e; }
+async function callModel(messages, avoid = new Set(), part = "negation", rec = current) {
+  if (!tapped.has(partKey(rec.id, part))) { const e = new Error("Tap \u201cUnsay this record\u201d to ask the model."); e.fatal = true; throw e; }
   const key = directKey();
   const pool = settings.models.filter(m => isFree(m));
   const chosen = isFree(settings.model) && !avoid.has(settings.model) ? settings.model : (pool[0] || "openrouter/free");
@@ -1366,8 +1378,8 @@ async function callModel(messages, avoid = new Set(), part = "negation") {
   for (const group of groups) {
     if (attempt++ && !key && !(last && last.status === 422)) break;   // retry only after an unreadable answer
     const headers = { "Content-Type": "application/json" };
-    const body = { model: group[0], messages, temperature: 0.7, max_tokens: part === "absence" ? 400 : 1800,
-                   record_id: current.id, record_part: part, fresh: !!generateFresh || attempt > 1 };   // lets the Worker reuse a record it already wrote
+    const body = { model: group[0], messages, temperature: 0.7, max_tokens: part === "absence" ? 800 : 1500,
+                   record_id: rec.id, record_part: part, fresh: !!generateFresh || attempt > 1 };   // lets the Worker reuse a record it already wrote
     if (key) {
       headers.Authorization = "Bearer " + key;
       headers["HTTP-Referer"] = location.origin && location.origin !== "null" ? location.origin : "https://github.com";
@@ -1385,13 +1397,13 @@ async function callModel(messages, avoid = new Set(), part = "negation") {
       const j = await res.json().catch(() => ({}));
       let text = j.choices?.[0]?.message?.content || "";
       if (Array.isArray(text)) text = text.map(c => c.text || "").join("");
-      const record = readRecord(text, part, current.standard.map(([k]) => k));
+      const record = readRecord(text, part, rec.standard.map(([k]) => k));
       if (!record) console.warn(`[unsay] unreadable ${part} answer from ${j.model || group[0]}:`, String(text).slice(0, 600));
       if (record && (part === "negation" ? record.negations : record.absences)) {
         // complete enough? (most fields negated, and a real list of absences)
         const got = Object.keys(negationMap(record)).length;
         const abs = Array.isArray(record.absences) ? record.absences.length : record.absences ? 1 : 0;
-        const complete = part === "negation" ? got >= Math.ceil(current.standard.length * 0.6) : abs >= 2;
+        const complete = part === "negation" ? got >= Math.ceil(rec.standard.length * 0.6) : abs >= 2;
         if (complete) { lastModelUsed = j.model || group[0]; return record; }
         if (!best || got + abs > best.score) best = { record, model: j.model || group[0], score: got + abs };
       }
@@ -1423,144 +1435,90 @@ async function callModel(messages, avoid = new Set(), part = "negation") {
 
 const RETRY_PAUSE_MS = 2 * 60 * 1000;   // wait two minutes before asking again
 const MAX_AUTO_RETRIES = 3;
+
+/* Negation Metadata and What Is Absent are two independent prompts.
+   Each tab has its own "Unsay this record" button, which runs only that tab's prompt.
+   Nothing is sent to the model without that tap (opening, searching, switching tabs
+   or reloading never prompts). A tap also allows that tab's automatic retry after a pause. */
+const partKey = (id, part) => `${id}:${part}`;
+const tapped = new Set();         // "id:part" the visitor has asked for in this visit
+const partState = {};             // "id:part" -> "pending" | { waitUntil, reason, force } | error message
 const retries = {}, retryTimers = {};
 let countdownTimer = null;
 
-// What Is Absent failed for a passing reason: wait two minutes, then ask for the five lines only
-const absenceRetries = {};
-function scheduleAbsenceRetry(r) {
-  if ((absenceRetries[r.id] || 0) >= MAX_AUTO_RETRIES) return;
-  absenceRetries[r.id] = (absenceRetries[r.id] || 0) + 1;
-  const neg = cachedNeg(r.id);
-  if (!neg) return;
-  neg.absenceRetryAt = Date.now() + RETRY_PAUSE_MS;
-  storeNeg(r.id, neg);
-  if (current.id === r.id) renderNegative();
-  clearTimeout(retryTimers["abs" + r.id]);
-  retryTimers["abs" + r.id] = setTimeout(() => retryAbsences(r), RETRY_PAUSE_MS);
-}
-async function retryAbsences(r) {
-  if (!tapped.has(r.id)) return;                  // never prompt without a tap
-  const neg = cachedNeg(r.id);
-  if (!neg || neg.absences.length) return;
-  clearTimeout(retryTimers["abs" + r.id]);
-  if (current.id !== r.id) { neg.absenceRetryAt = 0; storeNeg(r.id, neg); return; }   // left the painting: leave the button
-  neg.absenceRetryAt = 0; neg.absenceError = ""; neg.absencePending = true; storeNeg(r.id, neg); renderNegative();
-  try {
-    const [system, userText] = absencePrompt(r);
-    const out = await callModel([{ role: "system", content: system }, { role: "user", content: userText }], new Set(), "absence");
-    neg.absences = fiveSentences((Array.isArray(out.absences) ? out.absences : []).map(String));
-    delete absenceRetries[r.id];
-  } catch (e) {
-    neg.absenceError = e.message + (workerIsOld() ? " (The Worker in Cloudflare is an older version: paste the latest llm-worker.js there and Deploy.)" : "");
-    neg.absencePending = false; storeNeg(r.id, neg);
-    if (e.transient) { scheduleAbsenceRetry(r); return; }
-  }
-  neg.absencePending = false;
-  storeNeg(r.id, neg);
-  if (current.id === r.id) renderNegative();
+function partDone(neg, part) {
+  if (!neg) return false;
+  return part === "negation" ? Array.isArray(neg.negations) && neg.negations.length > 0
+                             : Array.isArray(neg.absences) && neg.absences.length > 0;
 }
 
-/* The model is only ever asked after a tap on "Unsay this record" (or "Unsay again",
-   "Try now", "Ask again") for THIS painting. Opening, searching, switching tabs or
-   reloading never sends anything. A tap also allows the automatic retry after a pause. */
-const tapped = new Set();   // painting ids the visitor has asked to unsay in this visit
-function unsayClicked(force, now) {
-  tapped.add(current.id);
-  if (now) { clearTimeout(retryTimers[current.id]); delete genState[current.id]; }
-  generate(!!force, true);
-}
-function absenceClicked() {
-  tapped.add(current.id);
-  retryAbsences(current);
+function unsayClicked(part, force) {
+  const k = partKey(current.id, part);
+  tapped.add(k);
+  clearTimeout(retryTimers[k]);
+  if (partState[k] && partState[k].waitUntil) delete partState[k];
+  runPart(current, part, !!force);
 }
 
-function retryNow(force) {
-  const r = current;
-  clearTimeout(retryTimers[r.id]);
-  delete genState[r.id];
-  generate(force === "true" || force === true);
-}
+async function runPart(r, part, force) {
+  const k = partKey(r.id, part);
+  if (!tapped.has(k)) return;                       // never prompt without a tap
+  if (r.id === SEED.id) return;                     // the hand-written record
+  if (!force && partDone(cachedNeg(r.id), part)) return;
+  if (partState[k] === "pending") return;
 
-async function generate(force, fromTap = false) {
-  const r = current;
-  if (!fromTap && !tapped.has(r.id)) return;      // never prompt without a tap on "Unsay this record"
   await loadProxyInfo();
-  if (r.id === SEED.id && !force) return;          // the hand-written record
-  if (!force && cachedNeg(r.id)) return;           // already unsaid on this device
-  if (needsKey()) { renderNegative(); return; }
-  if (genState[r.id] === "pending") return;
-  if (genState[r.id] && genState[r.id].waitUntil) return;   // already waiting to retry
-
-  const token = ++genToken;
   generateFresh = !!force;
-  genState[r.id] = "pending";
-  if (force) localStorage.removeItem("cnpa:neg:" + r.id);
-  renderNegative();
+  partState[k] = "pending";
+  if (current.id === r.id) renderNegative();
 
-  // one prompt per tab, text only: the model reads the metadata, never the image
-  async function ask(part) {
-    const build = part === "negation" ? negationPrompt : absencePrompt;
-    const [system, userText] = build(r);
-    const out = await callModel([{ role: "system", content: system }, { role: "user", content: userText }], new Set(), part);
-    return { out, imageSeen: false, model: lastModelUsed };
-  }
-
-  let negPart = null, absPart = null, err = null;
-  try { negPart = await ask("negation"); } catch (e) { err = e; }
-  if (negPart) { try { absPart = await ask("absence"); } catch (e) { err = e; } }
-  const raw = negPart ? { ...negPart.out, absences: absPart ? absPart.out.absences : [] } : null;
-  const imageSeen = negPart ? negPart.imageSeen : false;
-  lastModelUsed = negPart ? negPart.model : lastModelUsed;
-  const absenceError = negPart && !absPart && err ? err.message + (workerIsOld() ? " (The Worker in Cloudflare is an older version: paste the latest llm-worker.js there and Deploy.)" : "") : "";
-  const absenceRetry = !!(absenceError && err && err.transient);
-
-  if (!raw && err && err.transient && (retries[r.id] || 0) < MAX_AUTO_RETRIES) {
-    // pause two minutes, then ask again by itself
-    retries[r.id] = (retries[r.id] || 0) + 1;
-    genState[r.id] = { waitUntil: Date.now() + RETRY_PAUSE_MS, force,
-      reason: err.message + (workerIsOld() ? " (The Worker in Cloudflare is an older version: paste the latest llm-worker.js there and Deploy.)" : "") };
-    if (current.id === r.id) renderNegative();
-    clearTimeout(retryTimers[r.id]);
-    retryTimers[r.id] = setTimeout(() => {
-      if (genState[r.id] && genState[r.id].waitUntil && tapped.has(r.id) && current.id === r.id) { delete genState[r.id]; generate(force, true); }
-      else if (genState[r.id] && genState[r.id].waitUntil) { delete genState[r.id]; if (current.id === r.id) renderNegative(); }
-    }, RETRY_PAUSE_MS);
-    return;
-  }
-  if (raw) delete retries[r.id];
-
-  if (!raw) {
-    delete retries[r.id];
-    let msg = err ? err.message : "The record could not be unsaid.";
-    if (workerIsOld()) msg += " (The Worker in Cloudflare is an older version: paste the latest llm-worker.js there and Deploy.)";
+  const [system, userText] = (part === "negation" ? negationPrompt : absencePrompt)(r);
+  try {
+    const out = await callModel([{ role: "system", content: system }, { role: "user", content: userText }], new Set(), part, r);
+    const model = lastModelUsed || settings.model;
+    const neg = Object.assign({}, cachedNeg(r.id) || {});   // keep whatever the other tab already wrote
+    if (part === "negation") {
+      const map = negationMap(out);
+      neg.negations = r.standard.map(([label]) => [label, fiveNegations(map[label.toLowerCase()]) || "Not given. Not withheld either."]);
+      neg.breadcrumb = out.breadcrumb || "Not " + r.title;
+      neg.caption = out.caption || "Not this image.";
+      neg.overlay = out.overlay || "Ceci n\u2019est pas une archive.";
+      neg.negModel = model;
+    } else {
+      neg.absences = fiveSentences((Array.isArray(out.absences) ? out.absences : typeof out.absences === "string" ? out.absences.split(/\n+/) : [])
+        .map(a => String(typeof a === "object" && a ? (a.text || a.absence || Object.values(a)[0] || "") : a).replace(/^\s*[-\u2022\d.]+\s*/, "").trim())
+        .filter(Boolean));
+      neg.absModel = model;
+    }
+    neg.query = lastQuery;
+    neg.imageSeen = false;
+    neg.negations = neg.negations || [];
+    neg.absences = neg.absences || [];
+    storeNeg(r.id, neg);
+    delete partState[k]; delete retries[k];
+  } catch (e) {
+    let msg = e.message || "The record could not be unsaid.";
     if (/midnight UTC/.test(msg)) {
       const reset = new Date(); reset.setUTCHours(24, 0, 0, 0);
       msg += ` That is ${reset.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} your time.`;
     }
-    genState[r.id] = msg;
-    if (current.id === r.id) renderNegative();
-    return;
+    if (workerIsOld()) msg += " (The Worker in Cloudflare is an older version: paste the latest llm-worker.js there and Deploy.)";
+    if (e.transient && (retries[k] || 0) < MAX_AUTO_RETRIES) {
+      retries[k] = (retries[k] || 0) + 1;
+      partState[k] = { waitUntil: Date.now() + RETRY_PAUSE_MS, reason: msg, force };
+      clearTimeout(retryTimers[k]);
+      retryTimers[k] = setTimeout(() => {
+        const st = partState[k];
+        if (!st || !st.waitUntil) return;
+        delete partState[k];
+        if (current.id === r.id && tapped.has(k)) runPart(r, part, force);   // only if still on this painting
+        else if (current.id === r.id) renderNegative();
+      }, RETRY_PAUSE_MS);
+    } else {
+      partState[k] = msg;
+      delete retries[k];
+    }
   }
-
-  const map = negationMap(raw);
-  const neg = {
-    breadcrumb: raw.breadcrumb || "Not " + r.title,
-    caption: raw.caption || "Not this image.",
-    overlay: raw.overlay || "Ceci n\u2019est pas une archive.",
-    negations: r.standard.map(([label]) => [label, String(map[label.toLowerCase()] || "Not given. Not withheld either.")]),
-    absences: fiveSentences((Array.isArray(raw.absences) ? raw.absences : typeof raw.absences === "string" ? raw.absences.split(/\n+/) : [])
-      .map(a => String(typeof a === "object" && a ? (a.text || a.absence || Object.values(a)[0] || "") : a).replace(/^\s*[-\u2022\d.]+\s*/, "").trim())
-      .filter(Boolean)
-    ),   // What Is Absent: at most five SENTENCES (an item holding several sentences counts as several)
-    model: lastModelUsed || settings.model,
-    query: lastQuery,
-    imageSeen,
-    absenceError
-  };
-  storeNeg(r.id, neg);
-  if (absenceRetry) scheduleAbsenceRetry(r);
-  delete genState[r.id];
   if (current.id === r.id) { renderNegative(); switchTab(currentTab); }
 }
 
