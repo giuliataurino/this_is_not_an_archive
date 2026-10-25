@@ -1214,13 +1214,13 @@ function negationPrompt(r) {
   const system = `Counter-archive "Ceci n\u2019est pas une archive".
 Metadata = THIS. Negative metadata = NOT THAT.
 Below are a painting's catalogue fields from The Met's collection API. For EACH field, read its actual value and write what that value is NOT, by naming the alternatives it excludes:
-- Nationality or culture: other nationalities (French \u2192 "Not Spanish. Not Italian. Not Dutch.").
-- Date: other dates and periods (1900\u20131906 \u2192 "Not 1899. Not the 1950s. Not medieval.").
-- Medium: other materials and techniques (Oil on canvas \u2192 "Not watercolor. Not fresco. Not marble.").
+- Nationality or culture: other nationalities (French \u2192 "Not Spanish, not Italian, not Dutch.").
+- Date: other dates and periods (1900\u20131906 \u2192 "Not 1899, not the 1950s, not medieval.").
+- Medium: other materials and techniques (Oil on canvas \u2192 "Not watercolor, not fresco, not marble.").
 - Dimensions: other sizes and scales. Title, Artist, Place, Department, Credit Line, Gallery: other titles, makers, places, departments, ways of entering a museum, rooms.
-RULES: at most 5 negations per field, each a short sentence starting "Not". Every negation must follow from that field's actual value, but NEVER repeat the value itself or any word of it (for French write "Not Spanish", never "Not French" or "French"). Never state anything positively. Do not repeat these instructions or the field list. Never write the words negation, metadata or apophatic.
+RULES: at most 5 negations per field, written as ONE line separated by commas ("Not \u2026, not \u2026, not \u2026."). No numbering, no bullets, no lists. Every negation must follow from that field's actual value, but NEVER repeat the value itself or any word of it (for French write "Not Spanish", never "Not French" or "French"). Never state anything positively. Do not repeat these instructions or the field list. Never write the words negation, metadata or apophatic.
 Reply with JSON only:
-{"breadcrumb":"what the title is not, few words","caption":"one sentence: what the image is not","overlay":"\u226410 words","negations":{"<the field name exactly as written below>":"Not \u2026. Not \u2026."}}`;
+{"breadcrumb":"what the title is not, few words","caption":"one sentence: what the image is not","overlay":"\u226410 words","negations":{"<the field name exactly as written below>":"Not \u2026, not \u2026, not \u2026."}}`;
   const user = `METADATA (THIS):
 ${metadataLines(r)}
 ${searchNote()}`;
@@ -1229,16 +1229,16 @@ ${searchNote()}`;
 
 function absencePrompt(r) {
   const system = `Counter-archive "Ceci n\u2019est pas une archive". Section: "Fields the schema was never designed to receive".
-Read the painting's catalogue fields below (from The Met's collection API). Write exactly 10 sentences, one per line, each naming something this record does not and cannot hold. Mix two kinds, 5 of each:
-1. DESCRIPTIVE gaps: what the fields (title, artist, date, medium, dimensions, classification\u2026) leave out about the painting itself: the conditions of its making, the people and labour around it, what the painter turned away from, what no description of its surface can carry.
-2. PROVENANCE and EXHIBITION gaps: what the record does not say about the painting\u2019s life after it was made: who owned it before the museum and how it passed between them, sales, gaps in its chain of ownership, the years between its making and its Accession Year, how the Credit Line hides those hands, where it was exhibited or lent, who saw it, its time in storage, the rooms it hung in before its current gallery.
-Anchor each sentence in a specific field and its value where possible. Begin with What, Whether, Which, Who or That, or with a noun phrase. Invent no facts (no owners, sales or exhibitions that are not in the record); speculate only as "whether\u2026" or "what\u2026". Never write the words negation, metadata or apophatic.
-Example lines: What Ida was doing in the next room. / Whose walls it hung on between 1906 and its accession, and in which light.
+Read the painting's catalogue fields below (from The Met's collection API). Write exactly 10 sentences, one per line, each naming something this record does not and cannot carry. Focus mostly on the painting's PROVENANCE and EXHIBITION HISTORY:
+- About 7 sentences on provenance and exhibition history: who owned it before the museum and how it passed between them; sales, gifts, inheritances and dealers; gaps in its chain of ownership; the years between its making and its Accession Year; the hands the Credit Line leaves out; where it was exhibited or lent, which rooms and cities, who saw it; its journeys, crates and time in storage; the walls it hung on before its current gallery.
+- About 3 sentences on other fields the schema was never designed to carry: the conditions of its making, the unnamed people and labour around it, what no description of its surface can hold.
+Anchor each sentence in a specific field and its value where possible (Date, Accession Year, Credit Line, Object Number, Department, On view at\u2026). Begin with What, Whether, Which, Who, Whose or That, or with a noun phrase. Invent no facts: name no owners, dealers, sales or exhibitions that are not in the record; speculate only as "whether\u2026", "who\u2026" or "what\u2026". Never write the words negation, metadata or apophatic.
+Example lines: Whose walls it hung on between 1906 and its accession, and in which light. / What Ida was doing in the next room.
 Reply with the 10 lines only: no numbering, no headings, no other text.`;
   const user = `METADATA:
 ${metadataLines(r)}
 ${r.tags && r.tags.length ? `Subjects: ${r.tags.join(", ")}\n` : ""}${searchNote()}
-Write exactly 10 lines now: 5 descriptive gaps and 5 provenance and exhibition gaps.`;
+Write exactly 10 lines now, mostly on provenance and exhibition history.`;
   return [system, user];
 }
 
@@ -1336,28 +1336,41 @@ function fiveSentences(items) {
   return out;
 }
 
-// Keep only real negations of a field: no echoed instructions, no restated original value
+// Split a field's answer into single negations, whatever shape it came in:
+// "1. Not A 2. Not B", "Not A. Not B.", "Not A, not B", bullets or line breaks
+const NEG_START = "(?:not|no|never|neither|nor)\\b";
+function negItems(text) {
+  return String(Array.isArray(text) ? text.join(", ") : text || "")
+    .replace(/JSON keys? for negations?:?\s*(\[[^\]]*\])?/gi, " ")
+    .replace(/METADATA \(THIS\):?/gi, " ")
+    .replace(new RegExp(`(^|[\\s,;])\\(?\\d{1,2}[.)]\\s+(?=${NEG_START})`, "gi"), "$1\n")    // numbering -> line break
+    .replace(new RegExp(`(^|\\n)\\s*[-*\\u2022\\u2013]\\s*(?=${NEG_START})`, "gi"), "$1")      // bullets
+    .split(new RegExp(`(?:[.;!?\\u2026]\\s+|,\\s*|\\n+|\\s+\\u2014\\s*)(?=${NEG_START})`, "i"))
+    .map(x => x.replace(/[\s.,;:!?]+$/, "").trim())
+    .filter(Boolean);
+}
+
+// Keep only real negations: no echoed instructions, no positive statements, no word of the original value
 function cleanNegation(text, original) {
   const words = String(original || "").toLowerCase().split(/[^\p{L}\p{N}]+/u)
     .filter(w => w.length >= 3 && !/^(and|the|for|with|from|that|this|gift|fund|funds|purchase|not|met|fifth|avenue|gallery|view)$/.test(w));
-  const sentences = String(Array.isArray(text) ? text.join(" ") : text || "")
-    .replace(/JSON keys? for negations?:?\s*(\[[^\]]*\])?/gi, " ")
-    .replace(/METADATA \(THIS\):?/gi, " ")
-    .split(/(?<=[.!?\u2026])\s+(?=[A-Z\u201c"\u2018'(])/).map(x => x.trim()).filter(Boolean);
-  return sentences.filter(sn => {
-    const low = sn.toLowerCase();
-    if (!/^(not|no|never|neither|nor)\b/i.test(sn.replace(/^["\u201c\u2018']/, ""))) return false;   // positive statements out
-    return !words.some(w => new RegExp(`(^|[^\\p{L}])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\p{L}]|$)`, "u").test(low));  // the original value out
-  }).join(" ");
+  return negItems(text).filter(item => {
+    if (!new RegExp(`^["\\u201c\\u2018']?${NEG_START}`, "i").test(item)) return false;
+    const low = item.toLowerCase();
+    return !words.some(w => new RegExp(`(^|[^\\p{L}\\p{N}])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\p{L}\\p{N}]|$)`, "u").test(low));
+  });
 }
 
-// At most five negations per field
+// At most five negations, as one comma-separated line: "Not Spanish, not Italian, not Dutch."
 const MAX_NEGATIONS = 5;
-function fiveNegations(text) {
-  const parts = String(Array.isArray(text) ? text.join(" ") : text || "")
-    .split(/(?<=[.!?\u2026])\s+(?=[A-Z\u201c"\u2018'(])/).map(x => x.trim()).filter(Boolean);
-  return parts.slice(0, MAX_NEGATIONS).join(" ");
+function formatNegations(items) {
+  const list = items.slice(0, MAX_NEGATIONS).map((x, i) => {
+    const t = x.replace(/^["\u201c\u2018']/, "");
+    return i === 0 ? t.charAt(0).toUpperCase() + t.slice(1) : t.replace(/^(Not|No|Never|Neither|Nor)\b/, w => w.toLowerCase());
+  });
+  return list.length ? list.join(", ") + "." : "";
 }
+function fiveNegations(text) { return formatNegations(negItems(text)); }
 
 function negationMap(raw) {
   const out = {};
@@ -1493,7 +1506,7 @@ async function runPart(r, part, force) {
     const neg = Object.assign({}, cachedNeg(r.id) || {});   // keep whatever the other tab already wrote
     if (part === "negation") {
       const map = negationMap(out);
-      neg.negations = r.standard.map(([label, value]) => [label, fiveNegations(cleanNegation(map[label.toLowerCase()], value)) || "Not given. Not withheld either."]);
+      neg.negations = r.standard.map(([label, value]) => [label, formatNegations(cleanNegation(map[label.toLowerCase()], value)) || "Not given, not withheld either."]);
       neg.breadcrumb = out.breadcrumb && !String(out.breadcrumb).toLowerCase().includes(String(r.title).toLowerCase()) ? out.breadcrumb : "Not this title";
       neg.caption = out.caption || "Not this image.";
       neg.overlay = out.overlay || "Ceci n\u2019est pas une archive.";
