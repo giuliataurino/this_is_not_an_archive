@@ -634,8 +634,8 @@ localStorage.removeItem("cnpa:openrouter-key");
 // The Worker uses ONE free model (its MODEL setting) for every record; this list is only
 // a fallback name for display until the Worker reports which model it uses.
 const FREE_MODELS = [
-  "qwen/qwen3-next-80b-a3b-instruct:free",
   "meta-llama/llama-3.3-70b-instruct:free",
+  "qwen/qwen3-next-80b-a3b-instruct:free",
   "google/gemma-3-27b-it:free",
   "meta-llama/llama-4-scout:free",
   "openrouter/free"          // OpenRouter's own free picker: always last, always available
@@ -842,7 +842,16 @@ function renderNegative() {
   if (!neg) {
     const st = genState[current.id];
     let html;
+    clearInterval(countdownTimer);
     if (st === "pending") html = `<p class="gen-note pulse">Unsaying the record\u2026</p>`;
+    else if (st && st.waitUntil) {
+      const left = () => { const s = Math.max(0, Math.ceil((st.waitUntil - Date.now()) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+      html = `<p class="gen-note">${esc(st.reason)} Trying again in <span class="countdown">${left()}</span>.<button type="button" onclick="retryNow(${st.force ? "true" : "false"})">Try now</button></p>`;
+      countdownTimer = setInterval(() => {
+        if (!genState[current.id] || !genState[current.id].waitUntil) return clearInterval(countdownTimer);
+        document.querySelectorAll(".countdown").forEach(el => { el.textContent = left(); });
+      }, 1000);
+    }
     else if (needsKey()) html = `<p class="gen-note">The free model isn\u2019t connected.</p>`;
     else html = `<p class="gen-note">${st ? esc(st) : "This record has not been unsaid yet."}<button type="button" onclick="generate(false)">Unsay this record</button></p>`;
     negPanel.innerHTML = html;
@@ -862,7 +871,8 @@ function renderNegative() {
   if (!neg.absences.length) {
     absPanel.insertAdjacentHTML("beforeend", `<p class="gen-note">${esc(neg.absenceError || "What is absent hasn\u2019t been written for this record yet.")}<button type="button" onclick="generate(true)">Unsay again</button></p>`);
   }
-  neg.absences.forEach((text, i) => {
+  const shownAbsences = neg.authored ? neg.absences : fiveSentences(neg.absences);
+  shownAbsences.forEach((text, i) => {
     const p = document.createElement("p");
     p.className = "absence-item";
     p.style.animationDelay = `${i * 0.12}s`;
@@ -1292,6 +1302,17 @@ function readRecord(text, part = "negation", labels = []) {
 }
 
 // turn the model's negations into { label: text }, whatever shape it used
+// Split into sentences and keep the first five
+const MAX_ABSENCES = 5;
+function fiveSentences(items) {
+  const out = [];
+  for (const item of items) {
+    const parts = String(item).split(/(?<=[.!?\u2026])\s+(?=[A-Z\u201c"\u2018'(])/).map(x => x.trim()).filter(Boolean);
+    for (const p of parts) { if (out.length < MAX_ABSENCES) out.push(p); }
+  }
+  return out;
+}
+
 function negationMap(raw) {
   const out = {};
   const n = raw.negations;
@@ -1324,7 +1345,7 @@ async function callModel(messages, avoid = new Set(), part = "negation") {
   for (const group of groups) {
     if (attempt++ && !key && !(last && last.status === 422)) break;   // retry only after an unreadable answer
     const headers = { "Content-Type": "application/json" };
-    const body = { model: group[0], messages, temperature: 0.8, max_tokens: part === "absence" ? 600 : 1800,
+    const body = { model: group[0], messages, temperature: 0.7, max_tokens: part === "absence" ? 600 : 1800,
                    record_id: current.id, record_part: part, fresh: !!generateFresh || attempt > 1 };   // lets the Worker reuse a record it already wrote
     if (key) {
       headers.Authorization = "Bearer " + key;
@@ -1336,8 +1357,8 @@ async function callModel(messages, avoid = new Set(), part = "negation") {
     try {
       res = await fetch(key ? OPENROUTER_URL : PROXY_URL, { method: "POST", headers, body: JSON.stringify(body) });
     } catch {
-      const e = new Error(key ? "OpenRouter could not be reached from this browser." : "The site\u2019s proxy could not be reached. Check the connection and try again.");
-      e.fatal = true; throw e;
+      const e = new Error(key ? "OpenRouter could not be reached from this browser." : "The site\u2019s proxy could not be reached. Check the connection.");
+      e.fatal = true; e.transient = true; throw e;
     }
     if (res.ok) {
       const j = await res.json().catch(() => ({}));
@@ -1373,7 +1394,22 @@ async function callModel(messages, avoid = new Set(), part = "negation") {
     st === 422 ? "The model answered, but not in a form that could be read as a record. Unsay again." :
     (detail || `The free model answered with status ${st}.`));
   e.fatal = [401, 403, 404, 429].includes(st);
+  // worth trying again after a pause: empty answer, busy model, server hiccup, no connection
+  e.transient = st === 0 || st === 502 || st === 503 || st === 500 || st === 504 || st === 408 ||
+                (st === 429 && !/used up|per-day|per day|daily|midnight/i.test(detail));
   throw e;
+}
+
+const RETRY_PAUSE_MS = 2 * 60 * 1000;   // wait two minutes before asking again
+const MAX_AUTO_RETRIES = 3;
+const retries = {}, retryTimers = {};
+let countdownTimer = null;
+
+function retryNow(force) {
+  const r = current;
+  clearTimeout(retryTimers[r.id]);
+  delete genState[r.id];
+  generate(force === "true" || force === true);
 }
 
 async function generate(force) {
@@ -1383,6 +1419,7 @@ async function generate(force) {
   if (!force && cachedNeg(r.id)) return;           // already unsaid on this device
   if (needsKey()) { renderNegative(); return; }
   if (genState[r.id] === "pending") return;
+  if (genState[r.id] && genState[r.id].waitUntil) return;   // already waiting to retry
 
   const token = ++genToken;
   generateFresh = !!force;
@@ -1406,7 +1443,21 @@ async function generate(force) {
   lastModelUsed = negPart ? negPart.model : lastModelUsed;
   const absenceError = negPart && !absPart && err ? err.message : "";
 
+  if (!raw && err && err.transient && (retries[r.id] || 0) < MAX_AUTO_RETRIES) {
+    // pause two minutes, then ask again by itself
+    retries[r.id] = (retries[r.id] || 0) + 1;
+    genState[r.id] = { waitUntil: Date.now() + RETRY_PAUSE_MS, reason: err.message, force };
+    if (current.id === r.id) renderNegative();
+    clearTimeout(retryTimers[r.id]);
+    retryTimers[r.id] = setTimeout(() => {
+      if (genState[r.id] && genState[r.id].waitUntil) { delete genState[r.id]; generate(force); }
+    }, RETRY_PAUSE_MS);
+    return;
+  }
+  if (raw) delete retries[r.id];
+
   if (!raw) {
+    delete retries[r.id];
     let msg = err ? err.message : "The record could not be unsaid.";
     if (/midnight UTC/.test(msg)) {
       const reset = new Date(); reset.setUTCHours(24, 0, 0, 0);
@@ -1423,9 +1474,10 @@ async function generate(force) {
     caption: raw.caption || "Not this image.",
     overlay: raw.overlay || "Ceci n\u2019est pas une archive.",
     negations: r.standard.map(([label]) => [label, String(map[label.toLowerCase()] || "Not given. Not withheld either.")]),
-    absences: (Array.isArray(raw.absences) ? raw.absences : typeof raw.absences === "string" ? raw.absences.split(/\n+/) : [])
+    absences: fiveSentences((Array.isArray(raw.absences) ? raw.absences : typeof raw.absences === "string" ? raw.absences.split(/\n+/) : [])
       .map(a => String(typeof a === "object" && a ? (a.text || a.absence || Object.values(a)[0] || "") : a).replace(/^\s*[-\u2022\d.]+\s*/, "").trim())
-      .filter(Boolean).slice(0, 5),   // What Is Absent: at most five sentences
+      .filter(Boolean)
+    ),   // What Is Absent: at most five SENTENCES (an item holding several sentences counts as several)
     model: lastModelUsed || settings.model,
     query: lastQuery,
     imageSeen,
