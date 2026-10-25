@@ -685,7 +685,7 @@ async function loadProxyInfo() {
   return proxyInfo;
 }
 
-const WORKER_VERSION_NEEDED = 3;
+const WORKER_VERSION_NEEDED = 5;
 const workerIsOld = () => proxyInfo && !(Number(proxyInfo.version) >= WORKER_VERSION_NEEDED);
 const needsKey = () => false;   // always connected through the Worker
 
@@ -848,14 +848,14 @@ function renderNegative() {
     if (st === "pending") html = `<p class="gen-note pulse">Unsaying the record\u2026</p>`;
     else if (st && st.waitUntil) {
       const left = () => { const s = Math.max(0, Math.ceil((st.waitUntil - Date.now()) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
-      html = `<p class="gen-note">${esc(st.reason)} Trying again in <span class="countdown">${left()}</span>.<button type="button" onclick="retryNow(${st.force ? "true" : "false"})">Try now</button></p>`;
+      html = `<p class="gen-note">${esc(st.reason)} Trying again in <span class="countdown">${left()}</span>.<button type="button" onclick="unsayClicked(${st.force ? "true" : "false"}, true)">Try now</button></p>`;
       countdownTimer = setInterval(() => {
         if (!genState[current.id] || !genState[current.id].waitUntil) return clearInterval(countdownTimer);
         document.querySelectorAll(".countdown").forEach(el => { el.textContent = left(); });
       }, 1000);
     }
     else if (needsKey()) html = `<p class="gen-note">The free model isn\u2019t connected.</p>`;
-    else html = `<p class="gen-note">${st ? esc(st) : "This record has not been unsaid yet."}<button type="button" onclick="generate(false)">Unsay this record</button></p>`;
+    else html = `<p class="gen-note">${st ? esc(st) : "This record has not been unsaid yet."}<button type="button" onclick="unsayClicked(false)">Unsay this record</button></p>`;
     negPanel.innerHTML = html;
     absPanel.appendChild(heading);
     absPanel.insertAdjacentHTML("beforeend", html);
@@ -875,7 +875,7 @@ function renderNegative() {
       absPanel.insertAdjacentHTML("beforeend", `<p class="gen-note pulse">Listening for what the record cannot carry\u2026</p>`);
     } else if (neg.absenceRetryAt && neg.absenceRetryAt > Date.now()) {
       const left = () => { const s = Math.max(0, Math.ceil((neg.absenceRetryAt - Date.now()) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
-      absPanel.insertAdjacentHTML("beforeend", `<p class="gen-note">${esc(neg.absenceError || "")} Trying again in <span class="countdown">${left()}</span>.<button type="button" onclick="retryAbsences(current)">Try now</button></p>`);
+      absPanel.insertAdjacentHTML("beforeend", `<p class="gen-note">${esc(neg.absenceError || "")} Trying again in <span class="countdown">${left()}</span>.<button type="button" onclick="absenceClicked()">Try now</button></p>`);
       clearInterval(countdownTimer);
       countdownTimer = setInterval(() => {
         const n = cachedNeg(current.id);
@@ -883,7 +883,7 @@ function renderNegative() {
         document.querySelectorAll(".countdown").forEach(el => { el.textContent = left(); });
       }, 1000);
     } else {
-      absPanel.insertAdjacentHTML("beforeend", `<p class="gen-note">${esc(neg.absenceError || "What is absent hasn\u2019t been written for this record yet.")}<button type="button" onclick="retryAbsences(current)">Ask again</button></p>`);
+      absPanel.insertAdjacentHTML("beforeend", `<p class="gen-note">${esc(neg.absenceError || "What is absent hasn\u2019t been written for this record yet.")}<button type="button" onclick="absenceClicked()">Ask again</button></p>`);
     }
   }
   const shownAbsences = neg.authored ? neg.absences : fiveSentences(neg.absences);
@@ -896,7 +896,7 @@ function renderNegative() {
   });
 
   if (!neg.authored) {
-    const foot = `<div class="gen-foot"><span>Unsaid by ${esc(neg.model || "an open model")}${neg.query ? ` after a search for \u201c${esc(neg.query)}\u201d` : ""}${neg.imageSeen === true ? ", with the image" : ""}.</span><button type="button" onclick="generate(true)">Unsay again</button></div>`;
+    const foot = `<div class="gen-foot"><span>Unsaid by ${esc(neg.model || "an open model")}${neg.query ? ` after a search for \u201c${esc(neg.query)}\u201d` : ""}${neg.imageSeen === true ? ", with the image" : ""}.</span><button type="button" onclick="unsayClicked(true)">Unsay again</button></div>`;
     negPanel.insertAdjacentHTML("beforeend", foot);
     absPanel.insertAdjacentHTML("beforeend", foot);
   }
@@ -1350,6 +1350,7 @@ function negationMap(raw) {
 let lastModelUsed = "";
 let generateFresh = false;   // true while "Unsay again" asks for a new version
 async function callModel(messages, avoid = new Set(), part = "negation") {
+  if (!tapped.has(current.id)) { const e = new Error("Tap \u201cUnsay this record\u201d to ask the model."); e.fatal = true; throw e; }
   const key = directKey();
   const pool = settings.models.filter(m => isFree(m));
   const chosen = isFree(settings.model) && !avoid.has(settings.model) ? settings.model : (pool[0] || "openrouter/free");
@@ -1439,6 +1440,7 @@ function scheduleAbsenceRetry(r) {
   retryTimers["abs" + r.id] = setTimeout(() => retryAbsences(r), RETRY_PAUSE_MS);
 }
 async function retryAbsences(r) {
+  if (!tapped.has(r.id)) return;                  // never prompt without a tap
   const neg = cachedNeg(r.id);
   if (!neg || neg.absences.length) return;
   clearTimeout(retryTimers["abs" + r.id]);
@@ -1459,6 +1461,20 @@ async function retryAbsences(r) {
   if (current.id === r.id) renderNegative();
 }
 
+/* The model is only ever asked after a tap on "Unsay this record" (or "Unsay again",
+   "Try now", "Ask again") for THIS painting. Opening, searching, switching tabs or
+   reloading never sends anything. A tap also allows the automatic retry after a pause. */
+const tapped = new Set();   // painting ids the visitor has asked to unsay in this visit
+function unsayClicked(force, now) {
+  tapped.add(current.id);
+  if (now) { clearTimeout(retryTimers[current.id]); delete genState[current.id]; }
+  generate(!!force, true);
+}
+function absenceClicked() {
+  tapped.add(current.id);
+  retryAbsences(current);
+}
+
 function retryNow(force) {
   const r = current;
   clearTimeout(retryTimers[r.id]);
@@ -1466,9 +1482,10 @@ function retryNow(force) {
   generate(force === "true" || force === true);
 }
 
-async function generate(force) {
-  await loadProxyInfo();
+async function generate(force, fromTap = false) {
   const r = current;
+  if (!fromTap && !tapped.has(r.id)) return;      // never prompt without a tap on "Unsay this record"
+  await loadProxyInfo();
   if (r.id === SEED.id && !force) return;          // the hand-written record
   if (!force && cachedNeg(r.id)) return;           // already unsaid on this device
   if (needsKey()) { renderNegative(); return; }
@@ -1506,7 +1523,8 @@ async function generate(force) {
     if (current.id === r.id) renderNegative();
     clearTimeout(retryTimers[r.id]);
     retryTimers[r.id] = setTimeout(() => {
-      if (genState[r.id] && genState[r.id].waitUntil) { delete genState[r.id]; generate(force); }
+      if (genState[r.id] && genState[r.id].waitUntil && tapped.has(r.id) && current.id === r.id) { delete genState[r.id]; generate(force, true); }
+      else if (genState[r.id] && genState[r.id].waitUntil) { delete genState[r.id]; if (current.id === r.id) renderNegative(); }
     }, RETRY_PAUSE_MS);
     return;
   }
