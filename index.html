@@ -1218,28 +1218,27 @@ Below are a painting's catalogue fields from The Met's collection API. For EACH 
 - Date: other dates and periods (1900\u20131906 \u2192 "Not 1899. Not the 1950s. Not medieval.").
 - Medium: other materials and techniques (Oil on canvas \u2192 "Not watercolor. Not fresco. Not marble.").
 - Dimensions: other sizes and scales. Title, Artist, Place, Department, Credit Line, Gallery: other titles, makers, places, departments, ways of entering a museum, rooms.
-RULES: at most 5 negations per field, each a short sentence starting "Not". Every negation must follow from that field's actual value. Never state anything positively. Never write the words negation, metadata or apophatic.
+RULES: at most 5 negations per field, each a short sentence starting "Not". Every negation must follow from that field's actual value, but NEVER repeat the value itself or any word of it (for French write "Not Spanish", never "Not French" or "French"). Never state anything positively. Do not repeat these instructions or the field list. Never write the words negation, metadata or apophatic.
 Reply with JSON only:
-{"breadcrumb":"title negated, few words","caption":"one sentence: what the image is not","overlay":"\u226410 words","negations":{"<field label>":"Not \u2026. Not \u2026."}}`;
+{"breadcrumb":"what the title is not, few words","caption":"one sentence: what the image is not","overlay":"\u226410 words","negations":{"<the field name exactly as written below>":"Not \u2026. Not \u2026."}}`;
   const user = `METADATA (THIS):
 ${metadataLines(r)}
-${searchNote()}
-JSON keys for negations: ${JSON.stringify(r.standard.map(([k]) => k))}`;
+${searchNote()}`;
   return [system, user];
 }
 
 function absencePrompt(r) {
   const system = `Counter-archive "Ceci n\u2019est pas une archive". Section: "Fields the schema was never designed to receive".
-Read the painting's catalogue fields below (from The Met's collection API). Write up to 10 sentences, one per line, each naming something this record does not and cannot hold. Mix two kinds, about half each:
+Read the painting's catalogue fields below (from The Met's collection API). Write exactly 10 sentences, one per line, each naming something this record does not and cannot hold. Mix two kinds, 5 of each:
 1. DESCRIPTIVE gaps: what the fields (title, artist, date, medium, dimensions, classification\u2026) leave out about the painting itself: the conditions of its making, the people and labour around it, what the painter turned away from, what no description of its surface can carry.
 2. PROVENANCE and EXHIBITION gaps: what the record does not say about the painting\u2019s life after it was made: who owned it before the museum and how it passed between them, sales, gaps in its chain of ownership, the years between its making and its Accession Year, how the Credit Line hides those hands, where it was exhibited or lent, who saw it, its time in storage, the rooms it hung in before its current gallery.
 Anchor each sentence in a specific field and its value where possible. Begin with What, Whether, Which, Who or That, or with a noun phrase. Invent no facts (no owners, sales or exhibitions that are not in the record); speculate only as "whether\u2026" or "what\u2026". Never write the words negation, metadata or apophatic.
 Example lines: What Ida was doing in the next room. / Whose walls it hung on between 1906 and its accession, and in which light.
-Reply with the lines only: no numbering, no headings, no other text.`;
+Reply with the 10 lines only: no numbering, no headings, no other text.`;
   const user = `METADATA:
 ${metadataLines(r)}
 ${r.tags && r.tags.length ? `Subjects: ${r.tags.join(", ")}\n` : ""}${searchNote()}
-Write up to 10 lines now, mixing descriptive gaps with provenance and exhibition gaps.`;
+Write exactly 10 lines now: 5 descriptive gaps and 5 provenance and exhibition gaps.`;
   return [system, user];
 }
 
@@ -1337,6 +1336,21 @@ function fiveSentences(items) {
   return out;
 }
 
+// Keep only real negations of a field: no echoed instructions, no restated original value
+function cleanNegation(text, original) {
+  const words = String(original || "").toLowerCase().split(/[^\p{L}\p{N}]+/u)
+    .filter(w => w.length >= 3 && !/^(and|the|for|with|from|that|this|gift|fund|funds|purchase|not|met|fifth|avenue|gallery|view)$/.test(w));
+  const sentences = String(Array.isArray(text) ? text.join(" ") : text || "")
+    .replace(/JSON keys? for negations?:?\s*(\[[^\]]*\])?/gi, " ")
+    .replace(/METADATA \(THIS\):?/gi, " ")
+    .split(/(?<=[.!?\u2026])\s+(?=[A-Z\u201c"\u2018'(])/).map(x => x.trim()).filter(Boolean);
+  return sentences.filter(sn => {
+    const low = sn.toLowerCase();
+    if (!/^(not|no|never|neither|nor)\b/i.test(sn.replace(/^["\u201c\u2018']/, ""))) return false;   // positive statements out
+    return !words.some(w => new RegExp(`(^|[^\\p{L}])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\p{L}]|$)`, "u").test(low));  // the original value out
+  }).join(" ");
+}
+
 // At most five negations per field
 const MAX_NEGATIONS = 5;
 function fiveNegations(text) {
@@ -1354,7 +1368,7 @@ function negationMap(raw) {
       else if (x && typeof x === "object") out[String(x.field || x.label || x.name || "").toLowerCase().trim()] = x.text || x.value || x.negation;
     });
   } else if (n && typeof n === "object") {
-    Object.entries(n).forEach(([k, v]) => { out[k.toLowerCase().replace(/:$/, "").trim()] = Array.isArray(v) ? v.join(" ") : v; });
+    Object.entries(n).filter(([k]) => !/json keys|metadata/i.test(k)).forEach(([k, v]) => { out[k.toLowerCase().replace(/:$/, "").trim()] = Array.isArray(v) ? v.join(" ") : v; });
   }
   return out;
 }
@@ -1403,7 +1417,7 @@ async function callModel(messages, avoid = new Set(), part = "negation", rec = c
         // complete enough? (most fields negated, and a real list of absences)
         const got = Object.keys(negationMap(record)).length;
         const abs = Array.isArray(record.absences) ? record.absences.length : record.absences ? 1 : 0;
-        const complete = part === "negation" ? got >= Math.ceil(rec.standard.length * 0.6) : abs >= 2;
+        const complete = part === "negation" ? got >= Math.ceil(rec.standard.length * 0.6) : abs >= 8;
         if (complete) { lastModelUsed = j.model || group[0]; return record; }
         if (!best || got + abs > best.score) best = { record, model: j.model || group[0], score: got + abs };
       }
@@ -1479,8 +1493,8 @@ async function runPart(r, part, force) {
     const neg = Object.assign({}, cachedNeg(r.id) || {});   // keep whatever the other tab already wrote
     if (part === "negation") {
       const map = negationMap(out);
-      neg.negations = r.standard.map(([label]) => [label, fiveNegations(map[label.toLowerCase()]) || "Not given. Not withheld either."]);
-      neg.breadcrumb = out.breadcrumb || "Not " + r.title;
+      neg.negations = r.standard.map(([label, value]) => [label, fiveNegations(cleanNegation(map[label.toLowerCase()], value)) || "Not given. Not withheld either."]);
+      neg.breadcrumb = out.breadcrumb && !String(out.breadcrumb).toLowerCase().includes(String(r.title).toLowerCase()) ? out.breadcrumb : "Not this title";
       neg.caption = out.caption || "Not this image.";
       neg.overlay = out.overlay || "Ceci n\u2019est pas une archive.";
       neg.negModel = model;
