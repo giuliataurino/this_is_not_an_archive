@@ -685,6 +685,8 @@ async function loadProxyInfo() {
   return proxyInfo;
 }
 
+const WORKER_VERSION_NEEDED = 3;
+const workerIsOld = () => proxyInfo && !(Number(proxyInfo.version) >= WORKER_VERSION_NEEDED);
 const needsKey = () => false;   // always connected through the Worker
 
 // clear choices saved by earlier versions (other providers, keys, paid models)
@@ -869,7 +871,20 @@ function renderNegative() {
 
   absPanel.appendChild(heading);
   if (!neg.absences.length) {
-    absPanel.insertAdjacentHTML("beforeend", `<p class="gen-note">${esc(neg.absenceError || "What is absent hasn\u2019t been written for this record yet.")}<button type="button" onclick="generate(true)">Unsay again</button></p>`);
+    if (neg.absencePending) {
+      absPanel.insertAdjacentHTML("beforeend", `<p class="gen-note pulse">Listening for what the record cannot carry\u2026</p>`);
+    } else if (neg.absenceRetryAt && neg.absenceRetryAt > Date.now()) {
+      const left = () => { const s = Math.max(0, Math.ceil((neg.absenceRetryAt - Date.now()) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+      absPanel.insertAdjacentHTML("beforeend", `<p class="gen-note">${esc(neg.absenceError || "")} Trying again in <span class="countdown">${left()}</span>.<button type="button" onclick="retryAbsences(current)">Try now</button></p>`);
+      clearInterval(countdownTimer);
+      countdownTimer = setInterval(() => {
+        const n = cachedNeg(current.id);
+        if (!n || !n.absenceRetryAt) return clearInterval(countdownTimer);
+        document.querySelectorAll(".countdown").forEach(el => { el.textContent = left(); });
+      }, 1000);
+    } else {
+      absPanel.insertAdjacentHTML("beforeend", `<p class="gen-note">${esc(neg.absenceError || "What is absent hasn\u2019t been written for this record yet.")}<button type="button" onclick="retryAbsences(current)">Ask again</button></p>`);
+    }
   }
   const shownAbsences = neg.authored ? neg.absences : fiveSentences(neg.absences);
   shownAbsences.forEach((text, i) => {
@@ -1037,6 +1052,7 @@ function fromMet(o) {
     ["Subjects", tags.join(", ")],
     ["Credit Line", o.creditLine],
     ["Object Number", o.accessionNumber],
+    ["Accession Year", o.accessionYear],
     ["Department", o.department],
     ["Rights", o.rightsAndReproduction],
     ["On view at", o.GalleryNumber ? `The Met Fifth Avenue in Gallery ${o.GalleryNumber}` : "Not on view"]
@@ -1210,12 +1226,16 @@ JSON keys for negations: ${JSON.stringify(r.standard.map(([k]) => k))}`;
 }
 
 function absencePrompt(r) {
-  const system = `Counter-archive "Ceci n\u2019est pas une archive".
-From the painting's metadata below, write up to 5 sentences (never more) on what is ABSENT from it: what these fields leave out or were never designed to hold. Each sentence names one specific missing thing, tied where possible to a field (title, date, medium, credit line, gallery\u2026): conditions of its making, unnamed people and labour, what the painter turned away from, its years before the museum, storage, the gallery light now. Begin with What, Whether, Which, Who or That, or a noun phrase. Invent no facts; speculate only as "whether\u2026" or "what\u2026". Never write the words negation, metadata or apophatic.
-Example: "What Ida was doing in the next room."
-Reply with JSON only: {"absences":["\u2026"]}`;
-  const user = `${metadataLines(r)}
-${r.tags && r.tags.length ? `Subjects: ${r.tags.join(", ")}\n` : ""}${searchNote()}`;
+  const system = `Counter-archive "Ceci n\u2019est pas une archive". Section: "Fields the schema was never designed to receive".
+Read the painting's catalogue metadata below (from The Met's collection API). Write exactly 5 sentences, one per line, each naming something this metadata cannot hold: a field the schema was never designed to receive.
+Anchor each sentence in a specific field and its actual value (title, artist, date, medium, dimensions, credit line, accession year, gallery\u2026) and say what that field leaves out: the conditions of making, unnamed people and labour, what the painter turned away from, the years before the museum, storage, the light it hangs in now.
+Begin each sentence with What, Whether, Which, Who or That, or with a noun phrase. Invent no facts; speculate only as "whether\u2026" or "what\u2026". Never write the words negation, metadata or apophatic.
+Example line: What Ida was doing in the next room.
+Reply with the 5 lines only: no numbering, no title, no other text.`;
+  const user = `METADATA:
+${metadataLines(r)}
+${r.tags && r.tags.length ? `Subjects: ${r.tags.join(", ")}\n` : ""}${searchNote()}
+Write the 5 lines now.`;
   return [system, user];
 }
 
@@ -1345,7 +1365,7 @@ async function callModel(messages, avoid = new Set(), part = "negation") {
   for (const group of groups) {
     if (attempt++ && !key && !(last && last.status === 422)) break;   // retry only after an unreadable answer
     const headers = { "Content-Type": "application/json" };
-    const body = { model: group[0], messages, temperature: 0.7, max_tokens: part === "absence" ? 600 : 1800,
+    const body = { model: group[0], messages, temperature: 0.7, max_tokens: part === "absence" ? 400 : 1800,
                    record_id: current.id, record_part: part, fresh: !!generateFresh || attempt > 1 };   // lets the Worker reuse a record it already wrote
     if (key) {
       headers.Authorization = "Bearer " + key;
@@ -1405,6 +1425,40 @@ const MAX_AUTO_RETRIES = 3;
 const retries = {}, retryTimers = {};
 let countdownTimer = null;
 
+// What Is Absent failed for a passing reason: wait two minutes, then ask for the five lines only
+const absenceRetries = {};
+function scheduleAbsenceRetry(r) {
+  if ((absenceRetries[r.id] || 0) >= MAX_AUTO_RETRIES) return;
+  absenceRetries[r.id] = (absenceRetries[r.id] || 0) + 1;
+  const neg = cachedNeg(r.id);
+  if (!neg) return;
+  neg.absenceRetryAt = Date.now() + RETRY_PAUSE_MS;
+  storeNeg(r.id, neg);
+  if (current.id === r.id) renderNegative();
+  clearTimeout(retryTimers["abs" + r.id]);
+  retryTimers["abs" + r.id] = setTimeout(() => retryAbsences(r), RETRY_PAUSE_MS);
+}
+async function retryAbsences(r) {
+  const neg = cachedNeg(r.id);
+  if (!neg || neg.absences.length) return;
+  clearTimeout(retryTimers["abs" + r.id]);
+  if (current.id !== r.id) { neg.absenceRetryAt = 0; storeNeg(r.id, neg); return; }   // left the painting: leave the button
+  neg.absenceRetryAt = 0; neg.absenceError = ""; neg.absencePending = true; storeNeg(r.id, neg); renderNegative();
+  try {
+    const [system, userText] = absencePrompt(r);
+    const out = await callModel([{ role: "system", content: system }, { role: "user", content: userText }], new Set(), "absence");
+    neg.absences = fiveSentences((Array.isArray(out.absences) ? out.absences : []).map(String));
+    delete absenceRetries[r.id];
+  } catch (e) {
+    neg.absenceError = e.message + (workerIsOld() ? " (The Worker in Cloudflare is an older version: paste the latest llm-worker.js there and Deploy.)" : "");
+    neg.absencePending = false; storeNeg(r.id, neg);
+    if (e.transient) { scheduleAbsenceRetry(r); return; }
+  }
+  neg.absencePending = false;
+  storeNeg(r.id, neg);
+  if (current.id === r.id) renderNegative();
+}
+
 function retryNow(force) {
   const r = current;
   clearTimeout(retryTimers[r.id]);
@@ -1441,12 +1495,14 @@ async function generate(force) {
   const raw = negPart ? { ...negPart.out, absences: absPart ? absPart.out.absences : [] } : null;
   const imageSeen = negPart ? negPart.imageSeen : false;
   lastModelUsed = negPart ? negPart.model : lastModelUsed;
-  const absenceError = negPart && !absPart && err ? err.message : "";
+  const absenceError = negPart && !absPart && err ? err.message + (workerIsOld() ? " (The Worker in Cloudflare is an older version: paste the latest llm-worker.js there and Deploy.)" : "") : "";
+  const absenceRetry = !!(absenceError && err && err.transient);
 
   if (!raw && err && err.transient && (retries[r.id] || 0) < MAX_AUTO_RETRIES) {
     // pause two minutes, then ask again by itself
     retries[r.id] = (retries[r.id] || 0) + 1;
-    genState[r.id] = { waitUntil: Date.now() + RETRY_PAUSE_MS, reason: err.message, force };
+    genState[r.id] = { waitUntil: Date.now() + RETRY_PAUSE_MS, force,
+      reason: err.message + (workerIsOld() ? " (The Worker in Cloudflare is an older version: paste the latest llm-worker.js there and Deploy.)" : "") };
     if (current.id === r.id) renderNegative();
     clearTimeout(retryTimers[r.id]);
     retryTimers[r.id] = setTimeout(() => {
@@ -1459,6 +1515,7 @@ async function generate(force) {
   if (!raw) {
     delete retries[r.id];
     let msg = err ? err.message : "The record could not be unsaid.";
+    if (workerIsOld()) msg += " (The Worker in Cloudflare is an older version: paste the latest llm-worker.js there and Deploy.)";
     if (/midnight UTC/.test(msg)) {
       const reset = new Date(); reset.setUTCHours(24, 0, 0, 0);
       msg += ` That is ${reset.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} your time.`;
@@ -1484,6 +1541,7 @@ async function generate(force) {
     absenceError
   };
   storeNeg(r.id, neg);
+  if (absenceRetry) scheduleAbsenceRetry(r);
   delete genState[r.id];
   if (current.id === r.id) { renderNegative(); switchTab(currentTab); }
 }
