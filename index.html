@@ -1219,8 +1219,8 @@ Below are a painting's catalogue fields from The Met's collection API. For EACH 
 - Medium: other materials and techniques (Oil on canvas \u2192 "Not watercolor, not fresco, not marble.").
 - Dimensions: other sizes and scales. Title, Artist, Place, Department, Credit Line, Gallery: other titles, makers, places, departments, ways of entering a museum, rooms.
 RULES: at most 5 negations per field, written as ONE line separated by commas ("Not \u2026, not \u2026, not \u2026."). No numbering, no bullets, no lists. Every negation must follow from that field's actual value, but NEVER repeat the value itself or any word of it (for French write "Not Spanish", never "Not French" or "French"). Never state anything positively. Do not repeat these instructions or the field list. Never write the words negation, metadata or apophatic.
-Reply with JSON only:
-{"breadcrumb":"what the title is not, few words","caption":"one sentence: what the image is not","overlay":"\u226410 words","negations":{"<the field name exactly as written below>":"Not \u2026, not \u2026, not \u2026."}}`;
+Reply with JSON only, using these field names exactly:
+{"breadcrumb":"what the title is not, few words","caption":"one sentence: what the image is not","overlay":"\u226410 words","negations":{${r.standard.map(([k]) => `"${k}":"Not \u2026, not \u2026."`).join(",")}}}`;
   const user = `METADATA (THIS):
 ${metadataLines(r)}
 ${searchNote()}`;
@@ -1347,7 +1347,7 @@ function negItems(text) {
     .replace(new RegExp(`(^|\\n)\\s*[-*\\u2022\\u2013]\\s*(?=${NEG_START})`, "gi"), "$1")      // bullets
     .split(new RegExp(`(?:[.;!?\\u2026]\\s+|,\\s*|\\n+|\\s+\\u2014\\s*)(?=${NEG_START})`, "i"))
     .map(x => x.replace(/[\s.,;:!?]+$/, "").trim())
-    .filter(Boolean);
+    .filter(x => /^\W*\w+\W.*[\p{L}\p{N}]{2,}/u.test(x));   // drop empty placeholders like "Not \u2026"
 }
 
 // Keep only real negations: no echoed instructions, no positive statements, no word of the original value
@@ -1372,16 +1372,50 @@ function formatNegations(items) {
 }
 function fiveNegations(text) { return formatNegations(negItems(text)); }
 
-function negationMap(raw) {
-  const out = {};
+const normKey = k => String(k || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+const KEY_SYNONYMS = {
+  title: ["name", "titleofwork"], artist: ["maker", "painter", "artistdisplayname", "creator", "author"],
+  objecttype: ["objectname", "type"], culture: ["nationality"], date: ["objectdate", "year", "dates"],
+  geography: ["place", "location", "country", "madein"], medium: ["materials", "technique"],
+  dimensions: ["size", "measurements"], classification: ["category"], subjects: ["tags", "subject"],
+  creditline: ["credit", "acquisition", "provenance"], objectnumber: ["accessionnumber", "number"],
+  accessionyear: ["accession", "acquired"], department: ["dept", "curatorialdepartment"],
+  onviewat: ["gallery", "onview", "galleryonview", "galleryroom", "location"], rights: ["rightsandreproduction", "copyright"]
+};
+
+// Turn the model's negations into { "field label (lowercase)": text }, matching field names loosely
+function negationMap(raw, labels = []) {
+  const entries = [];
   const n = raw.negations;
   if (Array.isArray(n)) {
     n.forEach(x => {
-      if (Array.isArray(x)) out[String(x[0]).toLowerCase().trim()] = x[1];
-      else if (x && typeof x === "object") out[String(x.field || x.label || x.name || "").toLowerCase().trim()] = x.text || x.value || x.negation;
+      if (Array.isArray(x)) entries.push([x[0], x[1]]);
+      else if (x && typeof x === "object") entries.push([x.field || x.label || x.name || x.key || "", x.text || x.value || x.negation || x.negations || ""]);
+      else if (typeof x === "string") entries.push(["", x]);
     });
   } else if (n && typeof n === "object") {
-    Object.entries(n).filter(([k]) => !/json keys|metadata/i.test(k)).forEach(([k, v]) => { out[k.toLowerCase().replace(/:$/, "").trim()] = Array.isArray(v) ? v.join(" ") : v; });
+    Object.entries(n).forEach(([k, v]) => entries.push([k, v]));
+  }
+  const clean = entries
+    .filter(([k]) => !/json keys|^metadata$/i.test(String(k)))
+    .map(([k, v]) => [String(k).replace(/:$/, "").trim(), Array.isArray(v) ? v.join(", ") : (v && typeof v === "object" ? Object.values(v).join(", ") : String(v ?? ""))]);
+
+  const out = {};
+  if (!labels.length) { clean.forEach(([k, v]) => { out[k.toLowerCase()] = v; }); return out; }
+  const used = new Set();
+  const find = label => {
+    const L = normKey(label), syn = KEY_SYNONYMS[L] || [];
+    let i = clean.findIndex(([k], j) => !used.has(j) && normKey(k) === L);
+    if (i < 0) i = clean.findIndex(([k], j) => !used.has(j) && syn.includes(normKey(k)));
+    if (i < 0) i = clean.findIndex(([k], j) => !used.has(j) && normKey(k) && (normKey(k).includes(L) || L.includes(normKey(k))));
+    return i;
+  };
+  labels.forEach(label => { const i = find(label); if (i >= 0) { used.add(i); out[label.toLowerCase()] = clean[i][1]; } });
+  // whatever is left unmatched: pair it with the remaining fields in order
+  const leftoverFields = labels.filter(l => !(l.toLowerCase() in out));
+  const leftoverAnswers = clean.filter((_, j) => !used.has(j));
+  if (leftoverFields.length && leftoverAnswers.length === leftoverFields.length) {
+    leftoverFields.forEach((l, j) => { out[l.toLowerCase()] = leftoverAnswers[j][1]; });
   }
   return out;
 }
@@ -1428,7 +1462,7 @@ async function callModel(messages, avoid = new Set(), part = "negation", rec = c
       if (!record) console.warn(`[unsay] unreadable ${part} answer from ${j.model || group[0]}:`, String(text).slice(0, 600));
       if (record && (part === "negation" ? record.negations : record.absences)) {
         // complete enough? (most fields negated, and a real list of absences)
-        const got = Object.keys(negationMap(record)).length;
+        const got = Object.keys(negationMap(record, rec.standard.map(([k]) => k))).length;
         const abs = Array.isArray(record.absences) ? record.absences.length : record.absences ? 1 : 0;
         const complete = part === "negation" ? got >= Math.ceil(rec.standard.length * 0.6) : abs >= 8;
         if (complete) { lastModelUsed = j.model || group[0]; return record; }
@@ -1505,8 +1539,14 @@ async function runPart(r, part, force) {
     const model = lastModelUsed || settings.model;
     const neg = Object.assign({}, cachedNeg(r.id) || {});   // keep whatever the other tab already wrote
     if (part === "negation") {
-      const map = negationMap(out);
-      neg.negations = r.standard.map(([label, value]) => [label, formatNegations(cleanNegation(map[label.toLowerCase()], value)) || "Not given, not withheld either."]);
+      const map = negationMap(out, r.standard.map(([k]) => k));
+      neg.negations = r.standard.map(([label, value]) => {
+        const answer = map[label.toLowerCase()];
+        const strict = formatNegations(cleanNegation(answer, value));
+        // all removed for repeating the value: keep the plain "Not …" items rather than nothing
+        const loose = strict || formatNegations(negItems(answer).filter(x => /^(not|no|never)\b/i.test(x)));
+        return [label, loose || "Not given, not withheld either."];
+      });
       neg.breadcrumb = out.breadcrumb && !String(out.breadcrumb).toLowerCase().includes(String(r.title).toLowerCase()) ? out.breadcrumb : "Not this title";
       neg.caption = out.caption || "Not this image.";
       neg.overlay = out.overlay || "Ceci n\u2019est pas une archive.";
