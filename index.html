@@ -868,7 +868,7 @@ function renderNegative() {
   // Negation Metadata
   if (partDone(neg, "negation")) {
     if (partState[partKey(current.id, "negation")]) negPanel.insertAdjacentHTML("beforeend", partStatus("negation"));
-    neg.negations.forEach(([label, raw], i) => {
+    neg.negations.filter(([, raw]) => neg.authored || !/^not given[.,] not withheld either\.?$/i.test(String(raw).trim())).forEach(([label, raw], i) => {
       const value = neg.authored ? raw : fiveNegations(raw);
       const row = document.createElement("div");
       row.className = "neg-row";
@@ -1218,7 +1218,7 @@ Below are a painting's catalogue fields from The Met's collection API. For EACH 
 - Date: other dates and periods (1900\u20131906 \u2192 "Not 1899, not the 1950s, not medieval.").
 - Medium: other materials and techniques (Oil on canvas \u2192 "Not watercolor, not fresco, not marble.").
 - Dimensions: other sizes and scales. Title, Artist, Place, Department, Credit Line, Gallery: other titles, makers, places, departments, ways of entering a museum, rooms.
-RULES: at most 5 negations per field, written as ONE line separated by commas ("Not \u2026, not \u2026, not \u2026."). No numbering, no bullets, no lists. Every negation must follow from that field's actual value, but NEVER repeat the value itself or any word of it (for French write "Not Spanish", never "Not French" or "French"). Never state anything positively. Do not repeat these instructions or the field list. Never write the words negation, metadata or apophatic.
+RULES: write negations for EVERY field listed, including administrative ones (Object Number \u2192 other numbers; Accession Year \u2192 other years; Department \u2192 other departments; Classification \u2192 other kinds of object; Rights \u2192 other terms). At least 2 and at most 5 negations per field, written as ONE line separated by commas ("Not \u2026, not \u2026, not \u2026."). No numbering, no bullets, no lists. Every negation must follow from that field's actual value, but NEVER repeat the value itself or any word of it (for French write "Not Spanish", never "Not French" or "French"). Never state anything positively. Do not repeat these instructions or the field list. Never write the words negation, metadata or apophatic.
 Reply with JSON only, using these field names exactly:
 {"breadcrumb":"what the title is not, few words","caption":"one sentence: what the image is not","overlay":"\u226410 words","negations":{${r.standard.map(([k]) => `"${k}":"Not \u2026, not \u2026."`).join(",")}}}`;
   const user = `METADATA (THIS):
@@ -1464,7 +1464,8 @@ async function callModel(messages, avoid = new Set(), part = "negation", rec = c
         // complete enough? (most fields negated, and a real list of absences)
         const got = Object.keys(negationMap(record, rec.standard.map(([k]) => k))).length;
         const abs = Array.isArray(record.absences) ? record.absences.length : record.absences ? 1 : 0;
-        const complete = part === "negation" ? got >= Math.ceil(rec.standard.length * 0.6) : abs >= 8;
+        // negations: a third of the fields is enough here; the missing ones get their own short follow-up
+        const complete = part === "negation" ? got >= Math.ceil(rec.standard.length * 0.3) : abs >= 8;
         if (complete) { lastModelUsed = j.model || group[0]; return record; }
         if (!best || got + abs > best.score) best = { record, model: j.model || group[0], score: got + abs };
       }
@@ -1540,13 +1541,28 @@ async function runPart(r, part, force) {
     const neg = Object.assign({}, cachedNeg(r.id) || {});   // keep whatever the other tab already wrote
     if (part === "negation") {
       const map = negationMap(out, r.standard.map(([k]) => k));
-      neg.negations = r.standard.map(([label, value]) => {
-        const answer = map[label.toLowerCase()];
+      const negationFor = (answer, value) => {
         const strict = formatNegations(cleanNegation(answer, value));
         // all removed for repeating the value: keep the plain "Not …" items rather than nothing
-        const loose = strict || formatNegations(negItems(answer).filter(x => /^(not|no|never)\b/i.test(x)));
-        return [label, loose || "Not given, not withheld either."];
-      });
+        return strict || formatNegations(negItems(answer).filter(x => /^(not|no|never)\b/i.test(x)));
+      };
+      let rows = r.standard.map(([label, value]) => [label, negationFor(map[label.toLowerCase()], value)]);
+
+      // some fields came back empty: one follow-up request for just those fields
+      const missing = r.standard.filter(([label], i) => !rows[i][1]);
+      if (missing.length && missing.length < r.standard.length) {
+        const sub = { ...r, id: `${r.id}-missing`, standard: missing };   // not stored by the Worker
+        tapped.add(partKey(sub.id, "negation"));
+        try {
+          const [s2, u2] = negationPrompt(sub);
+          const extra = await callModel([{ role: "system", content: s2 }, { role: "user", content: u2 }], new Set(), "negation", sub);
+          const map2 = negationMap(extra, missing.map(([k]) => k));
+          rows = rows.map(([label, text], i) => [label, text || negationFor(map2[label.toLowerCase()], r.standard[i][1])]);
+        } catch {}
+      }
+      // a field that still has nothing is left out, rather than filled with a stock phrase
+      neg.negations = rows.filter(([, text]) => text);
+      if (!neg.negations.length) throw Object.assign(new Error("The model\u2019s answer had no usable negations. Unsay again."), { transient: true });
       neg.breadcrumb = out.breadcrumb && !String(out.breadcrumb).toLowerCase().includes(String(r.title).toLowerCase()) ? out.breadcrumb : "Not this title";
       neg.caption = out.caption || "Not this image.";
       neg.overlay = out.overlay || "Ceci n\u2019est pas une archive.";
