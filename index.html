@@ -592,6 +592,49 @@
   .elapsed { font-style: normal; font-variant-numeric: tabular-nums; color: #e0e0e0; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+
+  /* ───── Contrast, second pass: AAA (at least 7:1) for all small text, in both modes ───── */
+  :root {
+    --fg-dim: #4a4a4a;      /* grey labels, breadcrumb, tabs: 8.9:1 on white */
+    --fg-faint: #525252;    /* captions, status: 7.8:1 */
+    --accent: #9a3412;      /* artist name (deep orange): 7.3:1 */
+  }
+  body.apophatic {
+    --fg-dim: #bcbcbc;      /* 10.4:1 on #0a0a0a */
+    --fg-faint: #b8b8b8;    /* 10.0:1 */
+    --accent: #c4c4c4;      /* 11.4:1 */
+  }
+  /* struck-through text keeps full colour instead of fading (opacity lowered contrast) */
+  .title-struck { opacity: 1; color: #4a4a4a; }
+  body.apophatic .title-struck { opacity: 1; color: #bdb9b1; }
+  body.apophatic .artist-name { opacity: 1; color: #bcbcbc; }
+  body.apophatic .artwork-date { color: #bdb9b1; }
+  .public-domain, .image-caption { color: var(--fg-faint); }
+  .breadcrumb, .breadcrumb .bc-link, .breadcrumb .sep { color: var(--fg-dim); }
+  .breadcrumb .current { color: var(--fg); }
+  body.apophatic .breadcrumb .current { color: #d4d0c8; }
+  body.apophatic .topbar-left { color: #d4d0c8; }
+  body.apophatic .topbar-right { color: #bcbcbc; }
+  .tab-btn { color: var(--fg-dim); }
+  .neg-label { color: #bcbcbc; }
+  .neg-value { color: #d0ccc4; }
+  .absence-heading { color: #b8b8b8; }
+  .absence-item { color: #d0ccc4; }
+  .gen-note { color: #c4c4c4; }
+  .gen-note button, .gen-foot button { color: #ececec; }
+  .gen-foot { color: #b8b8b8; }
+  .elapsed { color: #ececec; }
+  .bottom-bar, .bottom-bar .credit-line { color: var(--fg-dim); }
+  body.apophatic .bottom-bar, body.apophatic .bottom-bar .credit-line { color: #b8b8b8; }
+  body.apophatic .bottom-bar .credit-title { color: #d4d0c8; }
+  .search-row .restart-btn { color: var(--fg-dim); }
+  .search-row input::placeholder { color: var(--fg-dim); opacity: 1; }
+  body.apophatic .search-row input::placeholder { color: #bcbcbc; }
+  .search-status-line[data-state="empty"] .search-status,
+  .search-status-line[data-state="error"] .search-status { color: var(--accent); }
+  /* text over the painting: a darker band and a soft shadow keep it legible on light areas */
+  .image-overlay { background: linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.6) 30%, transparent 70%); }
+  .image-overlay p { color: #f2f2f2; text-shadow: 0 1px 3px rgba(0,0,0,0.9); }
 </style>
 </head>
 <body>
