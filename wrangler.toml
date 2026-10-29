@@ -1,10 +1,16 @@
-# Only needed if you deploy with the command line (wrangler) instead of the dashboard.
-name = "not-an-archive-claude"
-main = "claude-worker.js"
+# Only needed if you deploy with the command line (wrangler) instead of the Cloudflare dashboard.
+# Secrets are never written here: add them with
+#   wrangler secret put Groq_Key
+#   wrangler secret put Openrouter_Key
+name = "not-an-archive"
+main = "llm-worker.js"
 compatibility_date = "2026-01-01"
 
-[vars]
-ALLOWED_ORIGINS = "https://YOUR-GITHUB-USERNAME.github.io"
+# Shared record store: each painting is unsaid once and served to every later visitor.
+# Create the namespace first (wrangler kv namespace create RECORDS) and paste its id here.
+# [[kv_namespaces]]
+# binding = "RECORDS"
+# id = "PASTE-THE-NAMESPACE-ID"
 
 # Optional: at most 20 requests per visitor per minute
 [[ratelimits]]
