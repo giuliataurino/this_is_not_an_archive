@@ -84,6 +84,8 @@
     transition: color var(--transition-speed) ease;
   }
   .breadcrumb span { cursor: pointer; }
+  .breadcrumb .bc-link { color: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; cursor: pointer; padding: 6px 0; }
+  .breadcrumb .bc-link:hover, .breadcrumb .bc-link:focus-visible { color: var(--fg); }
   .breadcrumb .sep { margin: 0 8px; cursor: default; }
   .breadcrumb .current {
     color: var(--fg);
@@ -609,9 +611,9 @@
 
   <!-- Breadcrumb -->
   <div class="breadcrumb">
-    <span id="bc-collection">The Met Collection</span>
+    <a id="bc-collection" class="bc-link" href="#" onclick="returnToStart(); return false;" title="Back to the opening page">The Met Collection</a>
     <span class="sep">›</span>
-    <span id="bc-search">Search Art</span>
+    <a id="bc-search" class="bc-link" href="#" onclick="goToSearch(); return false;" title="Back to the search">Search Art</a>
     <span class="sep">›</span>
     <span class="current" id="bc-title">Moonlight, Strandgade 30</span>
   </div>
@@ -737,7 +739,7 @@ async function loadProxyInfo() {
   return proxyInfo;
 }
 
-const WORKER_VERSION_NEEDED = 10;
+const WORKER_VERSION_NEEDED = 11;
 const workerIsOld = () => proxyInfo && !(Number(proxyInfo.version) >= WORKER_VERSION_NEEDED);
 const needsKey = () => false;   // always connected through the Worker
 
@@ -1274,6 +1276,19 @@ function returnToStart() {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+// "Search Art" in the breadcrumb: back to the search, keeping the current results
+function goToSearch() {
+  if (currentTab !== "standard") switchTab("standard");
+  $("restart-btn").hidden = current === SEED && !$("results").children.length;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  const q = $("q");
+  if (!q.value && lastQuery) q.value = lastQuery;
+  q.focus({ preventScroll: true });
+  if (q.value) q.select();
+  const active = document.querySelector(".thumb.active");
+  if (active) active.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+}
+
 function select(rec) {
   current = rec;
   const h = new URLSearchParams(location.hash.slice(1));
@@ -1316,14 +1331,14 @@ function absencePrompt(r) {
   const system = `Counter-archive "Ceci n\u2019est pas une archive". Section: "Fields the schema was never designed to receive".
 Read the painting's catalogue fields below (from The Met's collection API). Write exactly 10 sentences, one per line, each naming something this record does not and cannot carry. Divide them into two groups of 5:
 - 5 sentences on PROVENANCE and EXHIBITION HISTORY: who owned it before the museum and how it passed between them; sales, gifts, inheritances and dealers; gaps in its chain of ownership; the years between its making and its Accession Year; the hands the Credit Line leaves out; where it was exhibited or lent, which rooms and cities, who saw it; its journeys, crates and time in storage; the walls it hung on before its current gallery.
-- 5 sentences on OTHER FIELDS the schema was never designed to carry: the conditions of its making, the unnamed people and labour around it, what no description of its surface can hold.
+- 5 sentences on OTHER FIELDS the schema was never designed to carry. At least 2 of them about the SUBJECT and what the painting does NOT depict: who or what stands outside the frame, what the scene leaves out or turns away from, what happened before and after the moment shown, which people, places or events its Title and Subjects name without showing, and whom the image does not concern. The rest on the conditions of its making, the unnamed people and labour around it, what no description of its surface can hold.
 Anchor each sentence in a specific field and its value where possible (Date, Accession Year, Credit Line, Object Number, Department, On view at\u2026). Begin with What, Whether, Which, Who, Whose or That, or with a noun phrase. Invent no facts: name no owners, dealers, sales or exhibitions that are not in the record; speculate only as "whether\u2026", "who\u2026" or "what\u2026". Never write the words negation, metadata or apophatic.
-Example lines: Whose walls it hung on between 1906 and its accession, and in which light. / What Ida was doing in the next room.
+Example lines: Whose walls it hung on between 1906 and its accession, and in which light. / What Ida was doing in the next room. / Whether the moon the title names was ever in the sky the painting does not show.
 Reply with the 10 lines only: no numbering, no headings, no other text.`;
   const user = `METADATA:
 ${metadataLines(r)}
 ${r.tags && r.tags.length ? `Subjects: ${r.tags.join(", ")}\n` : ""}${searchNote()}
-Write exactly 10 lines now: first 5 on provenance and exhibition history, then 5 on other fields the schema was never designed to carry.`;
+Write exactly 10 lines now: first 5 on provenance and exhibition history, then 5 on other fields the schema was never designed to carry, at least 2 of them on the subject and what the painting does not depict.`;
   return [system, user];
 }
 
