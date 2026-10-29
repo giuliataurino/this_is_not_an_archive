@@ -1268,7 +1268,7 @@ async function search(q, opts = {}) {
   const all = new Set(first.objectIDs || []);
   const offsets = [];
   for (let off = PAGE_SIZE; off < total; off += PAGE_SIZE) offsets.push(off);
-  if (offsets.length) setSearchStatus("loading", `Gathering all ${total.toLocaleString()} matching records\u2026`);
+  if (offsets.length) setSearchStatus("loading", `Searching The Met for paintings matching \u201c${q}\u201d\u2026`);
   let next = 0;
   await Promise.all(Array.from({ length: 4 }, async () => {        // four pages at a time
     while (next < offsets.length && token === searchToken && Date.now() - startedAt < SEARCH_TIME_LIMIT_MS / 3) {
@@ -1296,15 +1296,14 @@ async function search(q, opts = {}) {
         const o = await getObject(id);
         if (token !== searchToken) return;
         checked++;
-        if (!shown) setSearchStatus("loading", `Choosing at random from ${all.size.toLocaleString()} records\u2026 (${checked} checked)`);
+        if (!shown) setSearchStatus("loading", `Searching\u2026 no paintings yet.`);
         if (!isPainting(o) || !(o.primaryImageSmall || o.primaryImage) || shown >= TARGET_IMAGES) continue;
         const rec = fromMet(o);
         shown++; searchShown = shown; thisTime.add(id);
         addThumb(rec);
         if (Date.now() - lastStatusAt > 250) {
           lastStatusAt = Date.now();
-          const secs = Math.ceil((SEARCH_TIME_LIMIT_MS - (Date.now() - startedAt)) / 1000);
-          setSearchStatus("loading", `Loading\u2026 ${shown.toLocaleString()} paintings so far, in random order from ${all.size.toLocaleString()} matching records (${checked.toLocaleString()} checked, ${secs}s left). Tap one to open it.`);
+          setSearchStatus("loading", `Loading\u2026 ${shown.toLocaleString()} painting${shown === 1 ? "" : "s"} so far. Tap one to open it.`);
         }
         if (firstPick) { firstPick = false; select(rec); }
         if (rec.id === current.id) document.querySelectorAll(".thumb").forEach(t => t.classList.toggle("active", Number(t.dataset.id) === current.id));
@@ -1320,10 +1319,10 @@ async function search(q, opts = {}) {
   shownBefore.set(key, merged.size >= all.size ? thisTime : merged);
 
   const slow = Date.now() - startedAt >= SEARCH_TIME_LIMIT_MS && i < order.length;
-  const n = shown.toLocaleString(), m = all.size.toLocaleString();
-  if (shown && !slow) setSearchStatus("done", `Done: all ${n} painting${shown === 1 ? "" : "s"} with images for \u201c${q}\u201d, from ${m} matching records, in random order.`);
-  else if (shown) setSearchStatus("done", `Done: ${n} paintings for \u201c${q}\u201d in random order, loaded in ${Math.round(SEARCH_TIME_LIMIT_MS / 1000)} seconds from ${m} matching records (${i.toLocaleString()} checked). Search again for a different selection.`);
-  else setSearchStatus("empty", slow ? `No paintings found for \u201c${q}\u201d within ${Math.round(SEARCH_TIME_LIMIT_MS / 1000)} seconds. Try another word.` : `No paintings with images found for \u201c${q}\u201d. Try another word.`);
+  const n = shown.toLocaleString();
+  if (shown && !slow) setSearchStatus("done", `Done: ${n} painting${shown === 1 ? "" : "s"} for \u201c${q}\u201d.`);
+  else if (shown) setSearchStatus("done", `Done: ${n} paintings for \u201c${q}\u201d. Search again for a different selection.`);
+  else setSearchStatus("empty", `No paintings with images found for \u201c${q}\u201d. Try another word.`);
 }
 
 // Thumbnails are added in small batches once per animation frame, so thousands stay smooth
