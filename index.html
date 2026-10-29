@@ -528,6 +528,68 @@
   body.apophatic .bottom-bar .credit-title { color: #777; }
   body { padding-bottom: 0; }
   body.apophatic .artwork-date { margin-top: 18px; }
+
+  /* ───── Accessibility: text contrast (WCAG AA, at least 4.5:1 for small text) ───── */
+  :root {
+    --fg-dim: #5c5c5c;      /* was #888 (3.5:1) → 6.7:1 on white */
+    --fg-faint: #646464;    /* was #999 (2.9:1) → 5.9:1 */
+    --accent: #b4441a;      /* artist name, was #e06030 (3.6:1) → 5.6:1 */
+  }
+  body.apophatic {
+    --fg-dim: #a3a3a3;      /* was #666 (3.5:1) → 7.9:1 on #0a0a0a */
+    --fg-faint: #9a9a9a;    /* was #555 (2.7:1) → 7.0:1 */
+    --accent: #b8b8b8;      /* was #777 */
+  }
+  .public-domain { color: var(--fg-dim); }
+  .title-struck { opacity: 0.7; }                                   /* struck text stays readable */
+  body.apophatic .topbar-left { color: #bdbdbd; }
+  body.apophatic .topbar-right { color: #9a9a9a; }
+  body.apophatic .breadcrumb .current { color: #c4c4c4; }
+  body.apophatic .artist-name { opacity: 0.8; }
+  body.apophatic .image-caption { color: var(--fg-faint); }
+  body.apophatic .title-struck { opacity: 0.75; }
+  .image-overlay p { color: #d6d6d6; }
+  .neg-label { color: #a8a8a8; opacity: 1; }
+  .neg-row .neg-label { animation-name: fadeIn; }
+  .absence-heading { color: #9a9a9a; }
+  .gen-note { color: #a8a8a8; }
+  .gen-note button { color: #e0e0e0; text-decoration: underline; text-underline-offset: 3px; }
+  .gen-foot { color: #9a9a9a; }
+  .gen-foot button { color: #d0d0d0; text-decoration: underline; text-underline-offset: 3px; }
+  .bottom-bar { color: var(--fg-dim); }
+  body.apophatic .bottom-bar { color: #9a9a9a; }
+  body.apophatic .bottom-bar .credit-title { color: #c4c4c4; }
+  .tab-btn { color: var(--fg-dim); }
+  .search-row .restart-btn { color: var(--fg-dim); }
+
+  /* ───── Search status: its own line, larger, with clear states ───── */
+  .search-status-line {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    max-width: 1100px; margin: 10px auto 0; padding: 10px 24px;
+    font-family: var(--sans); font-size: 14px; line-height: 1.4;
+    color: var(--fg);
+  }
+  .search-status-line[hidden] { display: none; }
+  .search-status { font-size: 14px; color: var(--fg); white-space: normal; }
+  .search-status-line[data-state="done"] .search-status { color: var(--fg); }
+  .search-status-line[data-state="empty"] .search-status,
+  .search-status-line[data-state="error"] .search-status { color: var(--accent); font-weight: 600; }
+  .stop-btn {
+    background: none; border: 1px solid var(--fg-dim); color: var(--fg);
+    font: 600 12px var(--sans); text-transform: uppercase; letter-spacing: 0.08em;
+    padding: 6px 12px; min-height: 36px; cursor: pointer; border-radius: 2px;
+  }
+  .stop-btn[hidden], .spinner[hidden] { display: none; }
+  .spinner {
+    width: 14px; height: 14px; flex: none; border-radius: 50%;
+    border: 2px solid var(--fg-faint); border-top-color: var(--fg);
+    animation: spin 0.9s linear infinite;
+  }
+  .gen-note.working { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-style: italic; }
+  .gen-note.working .spinner { border-color: #666; border-top-color: #e0e0e0; }
+  .elapsed { font-style: normal; font-variant-numeric: tabular-nums; color: #e0e0e0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
 </style>
 </head>
 <body>
@@ -558,9 +620,13 @@
   <form class="search-row" id="search-form" role="search">
     <input id="q" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search for other paintings" aria-label="Search keywords">
     <button type="submit">Search</button>
-    <span class="search-status" id="search-status" aria-live="polite"></span>
     <button type="button" class="restart-btn" id="restart-btn" onclick="returnToStart()" hidden>Back to Moonlight</button>
   </form>
+  <div class="search-status-line" id="search-status-line" hidden>
+    <span class="spinner" id="search-spinner" aria-hidden="true"></span>
+    <span class="search-status" id="search-status" role="status" aria-live="polite"></span>
+    <button type="button" class="stop-btn" id="stop-btn" onclick="stopSearch()">Stop</button>
+  </div>
   <div class="results-strip" id="results"></div>
 
   <!-- Main -->
@@ -649,6 +715,7 @@ const MET_SEARCH = "https://collectionapi.metmuseum.org/public/collection/v1.1/s
 const PAGE_SIZE = 500;        // the Met caps limit at 500
 const MAX_OFFSET = 10000;     // offset + limit may not exceed 10,000
 const TARGET_IMAGES = 200;    // paintings with viewable images to show per search
+const SEARCH_TIME_LIMIT_MS = 90000;   // a search stops after 90 s and keeps what it found
 
 
 const settings = {
@@ -685,7 +752,7 @@ async function loadProxyInfo() {
   return proxyInfo;
 }
 
-const WORKER_VERSION_NEEDED = 7;
+const WORKER_VERSION_NEEDED = 8;
 const workerIsOld = () => proxyInfo && !(Number(proxyInfo.version) >= WORKER_VERSION_NEEDED);
 const needsKey = () => false;   // always connected through the Worker
 
@@ -833,7 +900,14 @@ function renderRecord() {
 function partStatus(part) {
   const st = partState[partKey(current.id, part)];
   if (st === "pending") {
-    return `<p class="gen-note pulse">${part === "negation" ? "Unsaying the record\u2026" : "Listening for what the record cannot carry\u2026"}</p>`;
+    const since = pendingSince[partKey(current.id, part)] || Date.now();
+    const elapsed = () => { const s = Math.floor((Date.now() - since) / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+    clearInterval(countdownTimer);
+    countdownTimer = setInterval(() => {
+      if (partState[partKey(current.id, part)] !== "pending") return clearInterval(countdownTimer);
+      document.querySelectorAll(`.elapsed[data-part="${part}"]`).forEach(el => { el.textContent = elapsed(); });
+    }, 1000);
+    return `<p class="gen-note working"><span class="spinner" aria-hidden="true"></span>${part === "negation" ? "Unsaying the record" : "Listening for what the record cannot carry"} \u2014 <span class="elapsed" data-part="${part}">${elapsed()}</span>. Free models can take a minute or two.</p>`;
   }
   if (st && st.waitUntil) {
     const left = () => { const s = Math.max(0, Math.ceil((st.waitUntil - Date.now()) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
@@ -1105,6 +1179,21 @@ async function searchPage(q, offset) {
     : `The Met\u2019s search answered with status ${e.status}. Try again in a minute.`);
 }
 
+// state: "loading" (spinner + Stop), "done", "empty" or "error"
+function setSearchStatus(state, text) {
+  $("search-status-line").hidden = false;
+  $("search-status-line").dataset.state = state;
+  $("search-status").textContent = text;
+  $("search-spinner").hidden = state !== "loading";
+  $("stop-btn").hidden = state !== "loading";
+}
+let searchShown = 0;
+function stopSearch() {
+  ++searchToken;
+  setSearchStatus(searchShown ? "done" : "empty",
+    searchShown ? `Stopped. Showing ${searchShown} painting${searchShown === 1 ? "" : "s"}.` : "Stopped before any paintings were found.");
+}
+
 async function search(q, opts = {}) {
   q = q.trim();
   if (!q) return;
@@ -1113,10 +1202,12 @@ async function search(q, opts = {}) {
   const h = new URLSearchParams({ q });
   if (opts.keepSelection && current.id !== SEED.id) h.set("id", current.id);
   history.replaceState(null, "", "#" + h);
-  const status = $("search-status");
   $("results").innerHTML = "";
   $("restart-btn").hidden = false;
-  status.textContent = "Searching paintings\u2026";
+  searchShown = 0;
+  const startedAt = Date.now();
+  let checked = 0;
+  setSearchStatus("loading", `Searching The Met for paintings matching \u201c${q}\u201d\u2026`);
 
   searchVariant = 0;
   let shown = 0, first = !opts.keepSelection, offset = 0, total = Infinity;
@@ -1127,7 +1218,11 @@ async function search(q, opts = {}) {
   while (shown < TARGET_IMAGES && offset < total && offset < MAX_OFFSET) {
     let page;
     try { page = await searchPage(q, offset); }
-    catch (e) { if (token === searchToken) status.textContent = shown ? `${shown} paintings` : e.message; return; }
+    catch (e) {
+      if (token === searchToken) shown ? setSearchStatus("done", `Showing ${shown} painting${shown === 1 ? "" : "s"}. The Met stopped answering, so the search ended early.`)
+                                       : setSearchStatus("error", e.message);
+      return;
+    }
     if (token !== searchToken) return;
     total = page.total || 0;
     const ids = (page.objectIDs || []).filter(id => !seen.has(id));
@@ -1137,29 +1232,32 @@ async function search(q, opts = {}) {
 
     let i = 0;
     const worker = async () => {
-      while (i < ids.length && shown < TARGET_IMAGES) {
+      while (i < ids.length && shown < TARGET_IMAGES && Date.now() - startedAt < SEARCH_TIME_LIMIT_MS) {
         const id = ids[i++];
         try {
           const rank = rankOf.get(id);
           const o = await getObject(id);
           if (token !== searchToken) return;
+          checked++;
+          if (!shown) setSearchStatus("loading", `Searching\u2026 no paintings yet (${checked} records checked).`);
           if (!isPainting(o) || !(o.primaryImageSmall || o.primaryImage) || shown >= TARGET_IMAGES) continue;
           const rec = fromMet(o);
-          shown++;
+          shown++; searchShown = shown;
           addThumb(rec, rank);
-          status.textContent = `${shown} paintings\u2026`;
+          setSearchStatus("loading", `Loading\u2026 ${shown} painting${shown === 1 ? "" : "s"} found so far. Tap one to open it.`);
           if (first) { first = false; select(rec); }
           if (rec.id === current.id) document.querySelectorAll(".thumb").forEach(t => t.classList.toggle("active", Number(t.dataset.id) === current.id));
         } catch {}
       }
     };
-    await Promise.all(Array.from({ length: 8 }, worker));
+    await Promise.all(Array.from({ length: 10 }, worker));
     if (token !== searchToken) return;
+    if (Date.now() - startedAt >= SEARCH_TIME_LIMIT_MS) break;
   }
 
-  status.textContent = shown
-    ? `${shown} painting${shown === 1 ? "" : "s"}`
-    : `No paintings with images for \u201c${q}\u201d.`;
+  const slow = Date.now() - startedAt >= SEARCH_TIME_LIMIT_MS;
+  if (shown) setSearchStatus("done", `Done: ${shown} painting${shown === 1 ? "" : "s"} for \u201c${q}\u201d${slow ? " (search stopped after 90 seconds)" : ""}.`);
+  else setSearchStatus("empty", slow ? `No paintings found for \u201c${q}\u201d within 90 seconds. Try another word.` : `No paintings with images found for \u201c${q}\u201d. Try another word.`);
 }
 
 function addThumb(rec, rank = 0) {
@@ -1181,6 +1279,7 @@ function returnToStart() {
   ++searchToken;                       // stop any search still loading
   $("results").innerHTML = "";
   $("search-status").textContent = "";
+  $("search-status-line").hidden = true;
   $("q").value = "";
   lastQuery = "";
   currentTab = "standard";
@@ -1197,6 +1296,7 @@ function select(rec) {
   history.replaceState(null, "", h.toString() ? "#" + h : location.pathname + location.search);
   document.querySelectorAll(".thumb").forEach(t => t.classList.toggle("active", Number(t.dataset.id) === rec.id));
   renderRecord();   // nothing is sent to the model until "Unsay this record" is tapped
+  loadSharedRecord(rec);   // but a record someone already unsaid is shown straight away
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -1420,6 +1520,7 @@ function negationMap(raw, labels = []) {
   return out;
 }
 
+const REQUEST_TIMEOUT_MS = 100000;   // the page stops waiting after 100 s (the Worker gives up at 80 s)
 let lastModelUsed = "";
 let generateFresh = false;   // true while "Unsay again" asks for a new version
 async function callModel(messages, avoid = new Set(), part = "negation", rec = current) {
@@ -1449,8 +1550,14 @@ async function callModel(messages, avoid = new Set(), part = "negation", rec = c
     }
     let res;
     try {
-      res = await fetch(key ? OPENROUTER_URL : PROXY_URL, { method: "POST", headers, body: JSON.stringify(body) });
-    } catch {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+      try { res = await fetch(key ? OPENROUTER_URL : PROXY_URL, { method: "POST", headers, body: JSON.stringify(body), signal: ctrl.signal }); }
+      finally { clearTimeout(timer); }
+    } catch (err) {
+      if (err && err.name === "AbortError") {
+        const e = new Error("The free model took too long to answer."); e.transient = true; throw e;
+      }
       const e = new Error(key ? "OpenRouter could not be reached from this browser." : "The site\u2019s proxy could not be reached. Check the connection.");
       e.fatal = true; e.transient = true; throw e;
     }
@@ -1506,6 +1613,7 @@ const partKey = (id, part) => `${id}:${part}`;
 const tapped = new Set();         // "id:part" the visitor has asked for in this visit
 const partState = {};             // "id:part" -> "pending" | { waitUntil, reason, force } | error message
 const retries = {}, retryTimers = {};
+const pendingSince = {};          // "id:part" -> when the current request started
 let countdownTimer = null;
 
 function partDone(neg, part) {
@@ -1522,22 +1630,8 @@ function unsayClicked(part, force) {
   runPart(current, part, !!force);
 }
 
-async function runPart(r, part, force) {
-  const k = partKey(r.id, part);
-  if (!tapped.has(k)) return;                       // never prompt without a tap
-  if (r.id === SEED.id) return;                     // the hand-written record
-  if (!force && partDone(cachedNeg(r.id), part)) return;
-  if (partState[k] === "pending") return;
-
-  await loadProxyInfo();
-  generateFresh = !!force;
-  partState[k] = "pending";
-  if (current.id === r.id) renderNegative();
-
-  const [system, userText] = (part === "negation" ? negationPrompt : absencePrompt)(r);
-  try {
-    const out = await callModel([{ role: "system", content: system }, { role: "user", content: userText }], new Set(), part, r);
-    const model = lastModelUsed || settings.model;
+// Turn a model answer (fresh, or stored by the Worker) into this painting's record
+async function shapePart(r, part, out, model, allowFollowUp) {
     const neg = Object.assign({}, cachedNeg(r.id) || {});   // keep whatever the other tab already wrote
     if (part === "negation") {
       const map = negationMap(out, r.standard.map(([k]) => k));
@@ -1550,7 +1644,7 @@ async function runPart(r, part, force) {
 
       // some fields came back empty: one follow-up request for just those fields
       const missing = r.standard.filter(([label], i) => !rows[i][1]);
-      if (missing.length && missing.length < r.standard.length) {
+      if (allowFollowUp && missing.length && missing.length < r.standard.length) {
         const sub = { ...r, id: `${r.id}-missing`, standard: missing };   // not stored by the Worker
         tapped.add(partKey(sub.id, "negation"));
         try {
@@ -1573,10 +1667,54 @@ async function runPart(r, part, force) {
         .filter(Boolean));
       neg.absModel = model;
     }
-    neg.query = lastQuery;
+    if (allowFollowUp) neg.query = lastQuery;   // shared records keep no visitor's search
     neg.imageSeen = false;
     neg.negations = neg.negations || [];
     neg.absences = neg.absences || [];
+    return neg;
+}
+
+// Records already unsaid by any visitor are kept by the Worker; fetching them asks no model
+const sharedChecked = new Set();
+async function loadSharedRecord(r) {
+  if (!PROXY_URL || r.id === SEED.id || sharedChecked.has(r.id)) return;
+  sharedChecked.add(r.id);
+  const have = cachedNeg(r.id);
+  if (partDone(have, "negation") && partDone(have, "absence")) return;
+  try {
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 10000);
+    const j = await (await fetch(`${PROXY_URL}/?record=${encodeURIComponent(r.id)}`, { signal: ctrl.signal })).json();
+    clearTimeout(t);
+    if (!j || !j.stored) return;
+    for (const part of ["negation", "absence"]) {
+      const saved = j[part];
+      if (!saved || !saved.content || partDone(cachedNeg(r.id), part)) continue;
+      const out = readRecord(saved.content, part, r.standard.map(([k]) => k));
+      if (!out) continue;
+      try { storeNeg(r.id, await shapePart(r, part, out, saved.model || "", false)); } catch {}
+    }
+    if (current.id === r.id) { renderNegative(); switchTab(currentTab); }
+  } catch {}
+}
+
+async function runPart(r, part, force) {
+  const k = partKey(r.id, part);
+  if (!tapped.has(k)) return;                       // never prompt without a tap
+  if (r.id === SEED.id) return;                     // the hand-written record
+  if (!force && partDone(cachedNeg(r.id), part)) return;
+  if (partState[k] === "pending") return;
+
+  await loadProxyInfo();
+  generateFresh = !!force;
+  partState[k] = "pending";
+  pendingSince[k] = Date.now();
+  if (current.id === r.id) renderNegative();
+
+  const [system, userText] = (part === "negation" ? negationPrompt : absencePrompt)(r);
+  try {
+    const out = await callModel([{ role: "system", content: system }, { role: "user", content: userText }], new Set(), part, r);
+    const model = lastModelUsed || settings.model;
+    const neg = await shapePart(r, part, out, model, true);
     storeNeg(r.id, neg);
     delete partState[k]; delete retries[k];
   } catch (e) {
@@ -1634,6 +1772,22 @@ $("search-form").onsubmit = e => {
   $("q").blur();   // dismiss the iPad keyboard
   search($("q").value);
 };
+
+/* Gallery display: after IDLE_RESET_MS with no touch, click, key or scroll, the page returns
+   to Moonlight, Strandgade 30 by itself. Set to 0 to turn this off. */
+const IDLE_RESET_MS = 3 * 60 * 1000;
+let idleTimer = null;
+function armIdleReset() {
+  if (!IDLE_RESET_MS) return;
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    const away = current !== SEED || currentTab !== "standard" || $("results").children.length || $("q").value;
+    if (away) returnToStart();
+    armIdleReset();
+  }, IDLE_RESET_MS);
+}
+["pointerdown", "keydown", "wheel", "touchstart", "scroll"].forEach(ev => window.addEventListener(ev, armIdleReset, { passive: true }));
+armIdleReset();
 
 // Start with the original record; a link with #q=keywords opens that search instead
 renderRecord();
