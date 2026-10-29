@@ -756,7 +756,7 @@ const MET = "https://collectionapi.metmuseum.org/public/collection/v1";
 const MET_SEARCH = "https://collectionapi.metmuseum.org/public/collection/v1.1/search";
 const PAGE_SIZE = 500;        // the Met caps limit at 500
 const MAX_OFFSET = 10000;     // offset + limit may not exceed 10,000
-const TARGET_IMAGES = 500;    // at most 500 paintings per search, unless 90 seconds run out first
+const TARGET_IMAGES = 200;    // 200 paintings per search, chosen at random from ALL matches (or fewer if 90 s run out)
 const SEARCH_TIME_LIMIT_MS = 90000;   // a search stops after 90 s and keeps what it found
 
 
@@ -1224,6 +1224,19 @@ function stopSearch() {
     searchShown ? `Stopped. Showing ${searchShown} painting${searchShown === 1 ? "" : "s"}.` : "Stopped before any paintings were found.");
 }
 
+// A fair shuffle (Fisher–Yates), using the browser's secure random numbers
+function shuffle(list) {
+  const a = list.slice(), r = new Uint32Array(1);
+  for (let i = a.length - 1; i > 0; i--) {
+    crypto.getRandomValues(r);
+    const j = r[0] % (i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+// Paintings shown in earlier searches for the same words, so the next search shows others first
+const shownBefore = new Map();   // query (lowercase) -> Set of object IDs
+
 async function search(q, opts = {}) {
   q = q.trim();
   if (!q) return;
@@ -1238,57 +1251,66 @@ async function search(q, opts = {}) {
   const startedAt = Date.now();
   let checked = 0;
   setSearchStatus("loading", `Searching The Met for paintings matching \u201c${q}\u201d\u2026`);
-
   searchVariant = 0;
-  let shown = 0, first = !opts.keepSelection, offset = 0, total = Infinity;
-  const seen = new Set();
-  const rankOf = new Map();   // keeps thumbnails in the Met's relevance order
 
-  // page through results, 500 IDs at a time, until 500 paintings with images are on screen
-  // or 90 seconds have passed, whichever comes first
-  while (shown < TARGET_IMAGES && offset < total && offset < MAX_OFFSET) {
-    let page;
-    try { page = await searchPage(q, offset); }
-    catch (e) {
-      if (token === searchToken) shown ? setSearchStatus("done", `Showing ${shown} painting${shown === 1 ? "" : "s"}. The Met stopped answering, so the search ended early.`)
-                                       : setSearchStatus("error", e.message);
-      return;
+  // 1. Gather EVERY matching record ID (the Met returns them 500 at a time, up to 10,000)
+  let first;
+  try { first = await searchPage(q, 0); }
+  catch (e) { if (token === searchToken) setSearchStatus("error", e.message); return; }
+  if (token !== searchToken) return;
+  const total = Math.min(first.total || 0, MAX_OFFSET);
+  const all = new Set(first.objectIDs || []);
+  const offsets = [];
+  for (let off = PAGE_SIZE; off < total; off += PAGE_SIZE) offsets.push(off);
+  if (offsets.length) setSearchStatus("loading", `Gathering all ${total.toLocaleString()} matching records\u2026`);
+  let next = 0;
+  await Promise.all(Array.from({ length: 4 }, async () => {        // four pages at a time
+    while (next < offsets.length && token === searchToken && Date.now() - startedAt < SEARCH_TIME_LIMIT_MS / 3) {
+      const off = offsets[next++];
+      try { (await searchPage(q, off)).objectIDs?.forEach(id => all.add(id)); } catch {}
     }
-    if (token !== searchToken) return;
-    total = page.total || 0;
-    const ids = (page.objectIDs || []).filter(id => !seen.has(id));
-    ids.forEach(id => { seen.add(id); rankOf.set(id, rankOf.size); });
-    offset += PAGE_SIZE;
-    if (!ids.length) break;
+  }));
+  if (token !== searchToken) return;
+  if (!all.size) { setSearchStatus("empty", `No paintings with images found for \u201c${q}\u201d. Try another word.`); return; }
 
-    let i = 0;
-    const worker = async () => {
-      while (i < ids.length && shown < TARGET_IMAGES && Date.now() - startedAt < SEARCH_TIME_LIMIT_MS) {
-        const id = ids[i++];
-        try {
-          const rank = rankOf.get(id);
-          const o = await getObject(id);
-          if (token !== searchToken) return;
-          checked++;
-          if (!shown) setSearchStatus("loading", `Searching\u2026 no paintings yet (${checked} records checked).`);
-          if (!isPainting(o) || !(o.primaryImageSmall || o.primaryImage) || shown >= TARGET_IMAGES) continue;
-          const rec = fromMet(o);
-          shown++; searchShown = shown;
-          addThumb(rec, rank);
-          setSearchStatus("loading", `Loading\u2026 ${shown} painting${shown === 1 ? "" : "s"} found so far. Tap one to open it.`);
-          if (first) { first = false; select(rec); }
-          if (rec.id === current.id) document.querySelectorAll(".thumb").forEach(t => t.classList.toggle("active", Number(t.dataset.id) === current.id));
-        } catch {}
-      }
-    };
-    await Promise.all(Array.from({ length: 10 }, worker));
-    if (token !== searchToken) return;
-    if (Date.now() - startedAt >= SEARCH_TIME_LIMIT_MS) break;
-  }
+  // 2. Shuffle them, putting paintings already shown for these words last, so each search differs
+  const key = q.toLowerCase();
+  const before = shownBefore.get(key) || new Set();
+  const shuffled = shuffle([...all]);
+  const order = [...shuffled.filter(id => !before.has(id)), ...shuffled.filter(id => before.has(id))];
+  const rankOf = new Map(order.map((id, i) => [id, i]));
+  const thisTime = new Set();
+
+  // 3. Open records in that random order until TARGET_IMAGES paintings with images are found
+  let shown = 0, firstPick = !opts.keepSelection, i = 0;
+  const worker = async () => {
+    while (i < order.length && shown < TARGET_IMAGES && Date.now() - startedAt < SEARCH_TIME_LIMIT_MS) {
+      const id = order[i++];
+      try {
+        const o = await getObject(id);
+        if (token !== searchToken) return;
+        checked++;
+        if (!shown) setSearchStatus("loading", `Choosing at random from ${all.size.toLocaleString()} records\u2026 (${checked} checked)`);
+        if (!isPainting(o) || !(o.primaryImageSmall || o.primaryImage) || shown >= TARGET_IMAGES) continue;
+        const rec = fromMet(o);
+        shown++; searchShown = shown; thisTime.add(id);
+        addThumb(rec, rankOf.get(id));
+        setSearchStatus("loading", `Loading\u2026 ${shown} of up to ${TARGET_IMAGES} paintings, chosen at random from ${all.size.toLocaleString()} records. Tap one to open it.`);
+        if (firstPick) { firstPick = false; select(rec); }
+        if (rec.id === current.id) document.querySelectorAll(".thumb").forEach(t => t.classList.toggle("active", Number(t.dataset.id) === current.id));
+      } catch {}
+    }
+  };
+  await Promise.all(Array.from({ length: 10 }, worker));
+  if (token !== searchToken) return;
+
+  // remember this selection (once every match has been shown, start afresh)
+  const merged = new Set([...before, ...thisTime]);
+  shownBefore.set(key, merged.size >= all.size ? thisTime : merged);
 
   const slow = Date.now() - startedAt >= SEARCH_TIME_LIMIT_MS;
-  if (shown) setSearchStatus("done", `Done: ${shown} painting${shown === 1 ? "" : "s"} for \u201c${q}\u201d${
-    shown >= TARGET_IMAGES ? ` (the first ${TARGET_IMAGES})` : slow ? " (search stopped after 90 seconds)" : ""}.`);
+  if (shown) setSearchStatus("done", `Done: ${shown} painting${shown === 1 ? "" : "s"} for \u201c${q}\u201d, a random selection from ${all.size.toLocaleString()} matching records${
+    slow && shown < TARGET_IMAGES ? " (search stopped after 90 seconds)" : ""}. Search again for a different selection.`);
   else setSearchStatus("empty", slow ? `No paintings found for \u201c${q}\u201d within 90 seconds. Try another word.` : `No paintings with images found for \u201c${q}\u201d. Try another word.`);
 }
 
