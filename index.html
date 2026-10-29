@@ -629,6 +629,14 @@
   body.apophatic .bottom-bar .credit-title { color: #d4d0c8; }
   .search-row .restart-btn { color: var(--fg-dim); }
   .search-row input::placeholder { color: var(--fg-dim); opacity: 1; }
+  .scope-label { font-family: var(--sans); font-size: 12px; color: var(--fg-dim); white-space: nowrap; }
+  .scope-select {
+    font-family: var(--sans); font-size: 14px; color: var(--fg); background: transparent;
+    border: none; border-bottom: 1px solid var(--fg-dim); border-radius: 0; padding: 6px 2px; min-height: 40px; cursor: pointer;
+  }
+  body.apophatic .scope-select { color: var(--fg); }
+  body.apophatic .scope-select option { background: #0a0a0a; color: #d4d0c8; }
+  @media (max-width: 600px) { .scope-label { display: none; } }
   /* thumbnails keep a width before their image loads, so off-screen ones are loaded lazily */
   .thumb { min-width: 56px; }
   .thumb img { min-width: 56px; object-fit: cover; }
@@ -667,6 +675,13 @@
   <!-- Search by keyword -->
   <form class="search-row" id="search-form" role="search">
     <input id="q" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search for other paintings" aria-label="Search keywords">
+    <label class="scope-label" for="scope">Match in</label>
+    <select id="scope" class="scope-select" aria-label="Where the words are matched">
+      <option value="title-tags">Titles &amp; subjects</option>
+      <option value="title">Titles only</option>
+      <option value="tags">Subjects only</option>
+      <option value="all">Everything</option>
+    </select>
     <button type="submit">Search</button>
     <button type="button" class="restart-btn" id="restart-btn" onclick="returnToStart()" hidden>Back to Moonlight</button>
   </form>
@@ -1194,12 +1209,24 @@ const SEARCH_VARIANTS = [
 ];
 let searchVariant = 0;         // index of the variant that last worked
 
-async function searchPage(q, offset) {
+/* Where the keywords are matched. The Met's search is keyword-based: "Everything" matches the words
+   anywhere in a record (including credit lines and long titles), which is broad and loose.
+   Titles and subject tags are far more precise. "Titles & subjects" runs both and combines them. */
+const SEARCH_SCOPES = {
+  "title-tags": [{ title: "true" }, { tags: "true" }],
+  "title": [{ title: "true" }],
+  "tags": [{ tags: "true" }],
+  "all": [{}]
+};
+const DEFAULT_SCOPE = "title-tags";
+const scopeNow = () => SEARCH_SCOPES[$("scope").value] ? $("scope").value : DEFAULT_SCOPE;
+
+async function searchPage(q, offset, scope = {}) {
   let last;
   // every variant directly first, then every variant through the relay
   for (const relay of (useRelay ? [true] : [false, true])) {
     for (let v = searchVariant; v < SEARCH_VARIANTS.length; v++) {
-      const params = new URLSearchParams({ q, ...SEARCH_VARIANTS[v], offset: String(offset), limit: String(PAGE_SIZE) });
+      const params = new URLSearchParams({ q, ...scope, ...SEARCH_VARIANTS[v], offset: String(offset), limit: String(PAGE_SIZE) });
       try {
         const data = await metFetch(`${MET_SEARCH}?${params}`, 2, relay);
         searchVariant = v;
@@ -1248,6 +1275,7 @@ async function search(q, opts = {}) {
   const token = ++searchToken;
   lastQuery = q;
   const h = new URLSearchParams({ q });
+  if (scopeNow() !== DEFAULT_SCOPE) h.set("in", scopeNow());
   if (opts.keepSelection && current.id !== SEED.id) h.set("id", current.id);
   history.replaceState(null, "", "#" + h);
   $("results").innerHTML = "";
@@ -1259,28 +1287,38 @@ async function search(q, opts = {}) {
   setSearchStatus("loading", `Searching The Met for paintings matching \u201c${q}\u201d\u2026`);
   searchVariant = 0;
 
-  // 1. Gather EVERY matching record ID (the Met returns them 500 at a time, up to 10,000)
-  let first;
-  try { first = await searchPage(q, 0); }
-  catch (e) { if (token === searchToken) setSearchStatus("error", e.message); return; }
-  if (token !== searchToken) return;
-  const total = Math.min(first.total || 0, MAX_OFFSET);
-  const all = new Set(first.objectIDs || []);
-  const offsets = [];
-  for (let off = PAGE_SIZE; off < total; off += PAGE_SIZE) offsets.push(off);
-  if (offsets.length) setSearchStatus("loading", `Searching The Met for paintings matching \u201c${q}\u201d\u2026`);
-  let next = 0;
-  await Promise.all(Array.from({ length: 4 }, async () => {        // four pages at a time
-    while (next < offsets.length && token === searchToken && Date.now() - startedAt < SEARCH_TIME_LIMIT_MS / 3) {
-      const off = offsets[next++];
-      try { (await searchPage(q, off)).objectIDs?.forEach(id => all.add(id)); } catch {}
-    }
-  }));
-  if (token !== searchToken) return;
-  if (!all.size) { setSearchStatus("empty", `No paintings with images found for \u201c${q}\u201d. Try another word.`); return; }
+  // 1. Gather EVERY matching record ID for the chosen scope(s): 500 at a time, up to 10,000 each
+  const scopeName = scopeNow();
+  const all = new Set();
+  let anyAnswer = false, lastError = null;
+  for (const scope of SEARCH_SCOPES[scopeName]) {
+    searchVariant = 0;
+    let first;
+    try { first = await searchPage(q, 0, scope); anyAnswer = true; }
+    catch (e) { lastError = e; continue; }
+    if (token !== searchToken) return;
+    (first.objectIDs || []).forEach(id => all.add(id));
+    const total = Math.min(first.total || 0, MAX_OFFSET);
+    const offsets = [];
+    for (let off = PAGE_SIZE; off < total; off += PAGE_SIZE) offsets.push(off);
+    let next = 0;
+    await Promise.all(Array.from({ length: 4 }, async () => {        // four pages at a time
+      while (next < offsets.length && token === searchToken && Date.now() - startedAt < SEARCH_TIME_LIMIT_MS / 3) {
+        const off = offsets[next++];
+        try { (await searchPage(q, off, scope)).objectIDs?.forEach(id => all.add(id)); } catch {}
+      }
+    }));
+    if (token !== searchToken) return;
+  }
+  if (!anyAnswer) { setSearchStatus("error", lastError ? lastError.message : "The Met\u2019s search didn\u2019t answer."); return; }
+  if (!all.size) {
+    setSearchStatus("empty", scopeName === "all" ? `No paintings with images found for \u201c${q}\u201d. Try another word.`
+                                                  : `No paintings with \u201c${q}\u201d in their ${scopeName === "title" ? "titles" : scopeName === "tags" ? "subjects" : "titles or subjects"}. Try another word, or choose \u201cEverything\u201d.`);
+    return;
+  }
 
   // 2. Shuffle them, putting paintings already shown for these words last, so each search differs
-  const key = q.toLowerCase();
+  const key = `${scopeName}|${q.toLowerCase()}`;
   const before = shownBefore.get(key) || new Set();
   const shuffled = shuffle([...all]);
   const order = [...shuffled.filter(id => !before.has(id)), ...shuffled.filter(id => before.has(id))];
@@ -1322,7 +1360,7 @@ async function search(q, opts = {}) {
   const n = shown.toLocaleString();
   if (shown && !slow) setSearchStatus("done", `Done: ${n} painting${shown === 1 ? "" : "s"} for \u201c${q}\u201d.`);
   else if (shown) setSearchStatus("done", `Done: ${n} paintings for \u201c${q}\u201d. Search again for a different selection.`);
-  else setSearchStatus("empty", `No paintings with images found for \u201c${q}\u201d. Try another word.`);
+  else setSearchStatus("empty", `No paintings with images found for \u201c${q}\u201d. Try another word${scopeName === "all" ? "" : ", or choose \u201cEverything\u201d"}.`);
 }
 
 // Thumbnails are added in small batches once per animation frame, so thousands stay smooth
@@ -1866,6 +1904,11 @@ $("key-panel").onsubmit = e => {
   renderNegative();
 };
 
+try { const saved = localStorage.getItem("cnpa:scope"); if (SEARCH_SCOPES[saved]) $("scope").value = saved; } catch {}
+$("scope").onchange = () => {
+  try { localStorage.setItem("cnpa:scope", $("scope").value); } catch {}
+  if ($("q").value.trim()) search($("q").value);   // re-run the current search with the new scope
+};
 $("search-form").onsubmit = e => {
   e.preventDefault();
   $("q").blur();   // dismiss the iPad keyboard
@@ -1901,6 +1944,7 @@ getObject(SEED.id).then(o => {
 (async () => {
   const h = new URLSearchParams(location.hash.slice(1));
   const startQ = h.get("q"), startId = Number(h.get("id"));
+  if (SEARCH_SCOPES[h.get("in")]) $("scope").value = h.get("in");
   if (startId && startId !== SEED.id) {
     try {
       const o = await getObject(startId);
