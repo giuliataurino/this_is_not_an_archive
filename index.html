@@ -739,7 +739,7 @@ async function loadProxyInfo() {
   return proxyInfo;
 }
 
-const WORKER_VERSION_NEEDED = 11;
+const WORKER_VERSION_NEEDED = 12;
 const workerIsOld = () => proxyInfo && !(Number(proxyInfo.version) >= WORKER_VERSION_NEEDED);
 const needsKey = () => false;   // always connected through the Worker
 
@@ -1306,39 +1306,46 @@ function select(rec) {
    1. NEGATION METADATA: metadata says "this"; negative metadata says "not that".
    2. WHAT IS ABSENT: up to five sentences on what the metadata leaves out.            */
 
+// Only these fields are sent to the model (Artwork Details still shows everything).
+// Rights, Object Number, Department and the long artist biography are left out to save tokens.
+const PROMPT_FIELDS = ["Title", "Artist", "Culture", "Period", "Date", "Geography", "Medium",
+                       "Dimensions", "Subjects", "Credit Line", "Accession Year", "On view at"];
+function promptRecord(r) {
+  const rows = r.standard
+    .filter(([k]) => PROMPT_FIELDS.includes(k))
+    .map(([k, v]) => [k, k === "Artist" && r.artist ? `${r.artist}${r.nationality ? ` (${r.nationality})` : ""}` : v]);
+  return { ...r, standard: rows };
+}
+
 const searchNote = () => lastQuery ? `Visitor searched: "${lastQuery}" (let one line be not what was sought).` : "";
 const metadataLines = r => r.standard.map(([k, v]) => `${k}: ${v}`).join("\n");
 
 // Prompts are kept short on purpose: fewer tokens in, fewer tokens out, faster answers.
 function negationPrompt(r) {
-  const system = `Counter-archive "Ceci n\u2019est pas une archive".
-Metadata = THIS. Negative metadata = NOT THAT.
-Below are a painting's catalogue fields from The Met's collection API. For EACH field, read its actual value and write what that value is NOT, by naming the alternatives it excludes:
-- Nationality or culture: other nationalities (French \u2192 "Not Spanish, not Italian, not Dutch.").
-- Date: other dates and periods (1900\u20131906 \u2192 "Not 1899, not the 1950s, not medieval.").
-- Medium: other materials and techniques (Oil on canvas \u2192 "Not watercolor, not fresco, not marble.").
-- Dimensions: other sizes and scales. Title, Artist, Place, Department, Credit Line, Gallery: other titles, makers, places, departments, ways of entering a museum, rooms.
-RULES: write negations for EVERY field listed, including administrative ones (Object Number \u2192 other numbers; Accession Year \u2192 other years; Department \u2192 other departments; Classification \u2192 other kinds of object; Rights \u2192 other terms). At least 2 and at most 5 negations per field, written as ONE line separated by commas ("Not \u2026, not \u2026, not \u2026."). No numbering, no bullets, no lists. Every negation must follow from that field's actual value, but NEVER repeat the value itself or any word of it (for French write "Not Spanish", never "Not French" or "French"). Never state anything positively. Do not repeat these instructions or the field list. Never write the words negation, metadata or apophatic.
-Reply with JSON only, using these field names exactly:
-{"breadcrumb":"what the title is not, few words","caption":"one sentence: what the image is not","overlay":"\u226410 words","negations":{${r.standard.map(([k]) => `"${k}":"Not \u2026, not \u2026."`).join(",")}}}`;
-  const user = `METADATA (THIS):
-${metadataLines(r)}
+  const system = `Counter-archive "Ceci n\u2019est pas une archive". Metadata = THIS. Negative metadata = NOT THAT.
+For EACH field below (a painting's record from The Met), read its value and name 2 to 5 alternatives that value excludes, as one comma-separated line: "Not \u2026, not \u2026, not \u2026."
+Examples: French \u2192 Not Spanish, not Italian, not Dutch. 1900\u20131906 \u2192 Not 1899, not the 1950s, not medieval. Oil on canvas \u2192 Not watercolor, not fresco, not marble.
+Rules: never repeat the value or any word of it; never state anything positively; no numbering; never write the words negation, metadata or apophatic.
+Reply with plain lines only, no JSON, no other text:
+Breadcrumb: what the title is not, in a few words
+Caption: one sentence on what the image is not
+Overlay: at most 10 words
+then one line per field, using the field names exactly as given ("Field: Not \u2026, not \u2026.").`;
+  const user = `${metadataLines(r)}
 ${searchNote()}`;
   return [system, user];
 }
 
 function absencePrompt(r) {
   const system = `Counter-archive "Ceci n\u2019est pas une archive". Section: "Fields the schema was never designed to receive".
-Read the painting's catalogue fields below (from The Met's collection API). Write exactly 10 sentences, one per line, each naming something this record does not and cannot carry. Divide them into two groups of 5:
-- 5 sentences on PROVENANCE and EXHIBITION HISTORY: who owned it before the museum and how it passed between them; sales, gifts, inheritances and dealers; gaps in its chain of ownership; the years between its making and its Accession Year; the hands the Credit Line leaves out; where it was exhibited or lent, which rooms and cities, who saw it; its journeys, crates and time in storage; the walls it hung on before its current gallery.
-- 5 sentences on OTHER FIELDS the schema was never designed to carry. At least 2 of them about the SUBJECT and what the painting does NOT depict: who or what stands outside the frame, what the scene leaves out or turns away from, what happened before and after the moment shown, which people, places or events its Title and Subjects name without showing, and whom the image does not concern. The rest on the conditions of its making, the unnamed people and labour around it, what no description of its surface can hold.
-Anchor each sentence in a specific field and its value where possible (Date, Accession Year, Credit Line, Object Number, Department, On view at\u2026). Begin with What, Whether, Which, Who, Whose or That, or with a noun phrase. Invent no facts: name no owners, dealers, sales or exhibitions that are not in the record; speculate only as "whether\u2026", "who\u2026" or "what\u2026". Never write the words negation, metadata or apophatic.
-Example lines: Whose walls it hung on between 1906 and its accession, and in which light. / What Ida was doing in the next room. / Whether the moon the title names was ever in the sky the painting does not show.
-Reply with the 10 lines only: no numbering, no headings, no other text.`;
-  const user = `METADATA:
-${metadataLines(r)}
-${r.tags && r.tags.length ? `Subjects: ${r.tags.join(", ")}\n` : ""}${searchNote()}
-Write exactly 10 lines now: first 5 on provenance and exhibition history, then 5 on other fields the schema was never designed to carry, at least 2 of them on the subject and what the painting does not depict.`;
+From the painting's record below (The Met), write exactly 10 sentences, one per line, each naming something the record does not and cannot carry, in this order:
+Lines 1\u20135, OTHER FIELDS: at least 2 on the SUBJECT and what the painting does NOT depict (who or what is outside the frame, what the scene leaves out, before and after the moment shown, what the Title and Subjects name without showing, whom it does not concern); the rest on the conditions of its making, unnamed people and labour, what no description of its surface can hold.
+Lines 6\u201310, PROVENANCE and EXHIBITION HISTORY: owners before the museum and how it passed between them, sales, gifts, dealers, gaps in ownership, the years before its Accession Year, the hands the Credit Line leaves out, where it was exhibited or lent and who saw it, storage, the walls before its current gallery.
+Anchor sentences in specific fields where possible. Begin with What, Whether, Which, Who, Whose or That, or a noun phrase. Invent no owners, sales or exhibitions; speculate only as "whether\u2026", "who\u2026" or "what\u2026". Never write the words negation, metadata or apophatic.
+Examples: What Ida was doing in the next room. / Whose walls it hung on between 1906 and its accession.
+Reply with the 10 lines only: no numbering, no headings.`;
+  const user = `${metadataLines(r)}
+${searchNote()}`;
   return [system, user];
 }
 
@@ -1403,19 +1410,20 @@ function readRecord(text, part = "negation", labels = []) {
     }
   }
 
-  // b) no JSON at all: read plain lines
+  // b) no JSON: read plain "Name: text" lines (the format the negation prompt asks for)
   const lines = t.split(/\n+/).map(l => l.replace(/\*\*|__/g, "").replace(/^\s*(?:[-*\u2022]|\d+[.)])\s*/, "").trim()).filter(Boolean);
-  if (part === "negation" && labels.length) {
-    const negations = {};
-    let currentLabel = null;
+  if (part === "negation") {
+    const out = { negations: {} };
+    let currentKey = null;
     for (const line of lines) {
-      const m = line.match(/^([A-Za-z][A-Za-z ]{1,30}):\s*(.*)$/);
-      if (m && labels.some(l => l.toLowerCase() === m[1].trim().toLowerCase())) {
-        currentLabel = labels.find(l => l.toLowerCase() === m[1].trim().toLowerCase());
-        negations[currentLabel] = m[2];
-      } else if (currentLabel) negations[currentLabel] = (negations[currentLabel] + " " + line).trim();
+      const m = line.match(/^([A-Za-z][A-Za-z _-]{1,30}):\s*(.*)$/);
+      if (m) {
+        const name = m[1].trim(), low = name.toLowerCase();
+        if (["breadcrumb", "caption", "overlay"].includes(low)) { out[low] = m[2]; currentKey = null; continue; }
+        out.negations[name] = m[2]; currentKey = name;
+      } else if (currentKey) out.negations[currentKey] = (out.negations[currentKey] + " " + line).trim();
     }
-    if (Object.keys(negations).length) return { negations };
+    if (Object.keys(out.negations).length) return out;
   }
   if (part === "absence") {
     const sentences = lines.filter(l => !/^(here|sure|absences?|what is absent)\b.*:?$/i.test(l) && l.length > 20);
@@ -1540,7 +1548,7 @@ async function callModel(messages, avoid = new Set(), part = "negation", rec = c
   for (const group of groups) {
     if (attempt++ && !key && !(last && last.status === 422)) break;   // retry only after an unreadable answer
     const headers = { "Content-Type": "application/json" };
-    const body = { model: group[0], messages, temperature: 0.7, max_tokens: part === "absence" ? 800 : 1500,
+    const body = { model: group[0], messages, temperature: 0.7, max_tokens: part === "absence" ? 600 : 900,
                    record_id: rec.id, record_part: part, fresh: !!generateFresh || attempt > 1 };   // lets the Worker reuse a record it already wrote
     if (key) {
       headers.Authorization = "Bearer " + key;
@@ -1603,7 +1611,7 @@ async function callModel(messages, avoid = new Set(), part = "negation", rec = c
 }
 
 const RETRY_PAUSE_MS = 2 * 60 * 1000;   // wait two minutes before asking again
-const MAX_AUTO_RETRIES = 3;
+const MAX_AUTO_RETRIES = 1;   // one automatic retry after the pause: every retry repeats the whole prompt
 
 /* Negation Metadata and What Is Absent are two independent prompts.
    Each tab has its own "Unsay this record" button, which runs only that tab's prompt.
@@ -1644,7 +1652,7 @@ async function shapePart(r, part, out, model, allowFollowUp) {
 
       // some fields came back empty: one follow-up request for just those fields
       const missing = r.standard.filter(([label], i) => !rows[i][1]);
-      if (allowFollowUp && missing.length && missing.length < r.standard.length) {
+      if (allowFollowUp && missing.length >= 2 && missing.length < r.standard.length) {
         const sub = { ...r, id: `${r.id}-missing`, standard: missing };   // not stored by the Worker
         tapped.add(partKey(sub.id, "negation"));
         try {
@@ -1689,9 +1697,10 @@ async function loadSharedRecord(r) {
     for (const part of ["negation", "absence"]) {
       const saved = j[part];
       if (!saved || !saved.content || partDone(cachedNeg(r.id), part)) continue;
-      const out = readRecord(saved.content, part, r.standard.map(([k]) => k));
+      const pr = promptRecord(r);
+      const out = readRecord(saved.content, part, pr.standard.map(([k]) => k));
       if (!out) continue;
-      try { storeNeg(r.id, await shapePart(r, part, out, saved.model || "", false)); } catch {}
+      try { storeNeg(r.id, await shapePart(pr, part, out, saved.model || "", false)); } catch {}
     }
     if (current.id === r.id) { renderNegative(); switchTab(currentTab); }
   } catch {}
@@ -1710,11 +1719,12 @@ async function runPart(r, part, force) {
   pendingSince[k] = Date.now();
   if (current.id === r.id) renderNegative();
 
-  const [system, userText] = (part === "negation" ? negationPrompt : absencePrompt)(r);
+  const pr = promptRecord(r);            // only the fields worth unsaying are sent
+  const [system, userText] = (part === "negation" ? negationPrompt : absencePrompt)(pr);
   try {
-    const out = await callModel([{ role: "system", content: system }, { role: "user", content: userText }], new Set(), part, r);
+    const out = await callModel([{ role: "system", content: system }, { role: "user", content: userText }], new Set(), part, pr);
     const model = lastModelUsed || settings.model;
-    const neg = await shapePart(r, part, out, model, true);
+    const neg = await shapePart(pr, part, out, model, true);
     storeNeg(r.id, neg);
     delete partState[k]; delete retries[k];
   } catch (e) {
