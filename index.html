@@ -1371,7 +1371,7 @@ function select(rec) {
    ───────────────────────────────────────────────────────────── */
 /* Two separate prompts, sent as two requests:
    1. NEGATION METADATA: metadata says "this"; negative metadata says "not that".
-   2. WHAT IS ABSENT: up to five sentences on what the metadata leaves out.            */
+   2. WHAT IS ABSENT: ten sentences on what the record cannot carry (provenance and exhibition last). */
 
 // Only these fields are sent to the model (Artwork Details still shows everything).
 // Rights, Object Number, Department and the long artist biography are left out to save tokens.
@@ -1605,10 +1605,9 @@ async function callModel(messages, avoid = new Set(), part = "negation", rec = c
   const chosen = isFree(settings.model) && !avoid.has(settings.model) ? settings.model : (pool[0] || FREE_MODELS[0]);
   const chain = [chosen, ...pool.filter(m => m !== chosen)];
   let last = null, best = null;   // best: the fullest partial record seen, used if nothing complete arrives
-  // the Worker does its own fallbacks; the direct route tries up to three groups of three free models
-  // the Worker always uses its one model: ask twice at most, in case the first answer is unreadable
-  // one request per attempt: every request counts toward the 50-a-day free limit
-  // one request normally; a second, fresh one only if the first answer couldn't be read
+  // The Worker chooses the provider and model (Groq first, then OpenRouter's free models) and does
+  // its own fallbacks. The page sends one request, and a second, fresh one only if the first
+  // answer couldn't be read; every request counts toward the providers' free allowances.
   const groups = key ? [chain.slice(0, 3), chain.slice(3, 6), chain.slice(6, 9)].filter(g => g.length) : [[chosen], [chosen]];
   let attempt = 0;
   if (key) groups.push(["openrouter/free"]);   // last resort: OpenRouter picks any free model that fits
@@ -1825,7 +1824,7 @@ async function runPart(r, part, force) {
    ───────────────────────────────────────────────────────────── */
 function fillModelPanel() {
   $("model-input").innerHTML = settings.models.map(m =>
-    `<option value="${esc(m)}"${m === settings.model ? " selected" : ""}>${esc(m === "openrouter/free" ? "Any free vision model (OpenRouter picks)" : m.replace(/:free$/, ""))}</option>`).join("");
+    `<option value="${esc(m)}"${m === settings.model ? " selected" : ""}>${esc(m.replace(/:free$/, ""))}</option>`).join("");
   $("key-note").innerHTML = "Open models on Groq\u2019s free tier, with OpenRouter\u2019s free models as backup, through this site\u2019s secure connection; no key is needed here.";
 }
 async function openKey() {
