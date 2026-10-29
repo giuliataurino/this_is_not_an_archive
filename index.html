@@ -684,29 +684,26 @@
 
 <script>
 /* ─────────────────────────────────────────────────────────────
-   Configuration — negations are written only by FREE OpenRouter models
-   (model IDs ending in ":free"), reached through your Cloudflare Worker
-   (proxy/llm-worker.js). The OpenRouter key is a secret inside the Worker;
-   this page holds no key and cannot call any paid model.
+   Configuration — negations are written by open models (Llama, gpt-oss, Qwen, Gemma)
+   on Groq's free tier, with OpenRouter's free models as backup, reached through your
+   Cloudflare Worker (proxy/llm-worker.js). The Groq and OpenRouter keys are secrets
+   inside the Worker; this page holds no key.
    ───────────────────────────────────────────────────────────── */
 const PROXY_URL = "https://not-an-archive.g-taurino.workers.dev";
 
 /* The page never asks for or holds a key: it always connects to the Worker above,
-   which adds the OpenRouter key (stored as a Cloudflare secret) and calls free models only. */
+   which adds the Groq or OpenRouter key (stored as Cloudflare secrets) and picks the model. */
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const directKey = () => "";   // keys are never asked for: every request goes through the Worker
 localStorage.removeItem("cnpa:openrouter-key");
 
-// The Worker uses ONE free model (its MODEL setting) for every record; this list is only
-// a fallback name for display until the Worker reports which model it uses.
+// The Worker chooses the model (Groq first, then OpenRouter's free models); this list is only a display
+// fallback until the Worker reports which models it uses.
 const FREE_MODELS = [
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "qwen/qwen3-next-80b-a3b-instruct:free",
-  "google/gemma-3-27b-it:free",
-  "meta-llama/llama-4-scout:free",
-  "openrouter/free"          // OpenRouter's own free picker: always last, always available
+  "groq/llama-3.3-70b-versatile",
+  "openrouter/meta-llama/llama-3.3-70b-instruct:free"
 ];
-const isFree = id => /:free$/.test(id) || id === "openrouter/free";
+const isFree = id => !!id;   // every model behind the Worker is on a free tier
 
 const MET = "https://collectionapi.metmuseum.org/public/collection/v1";
 // /v1/search was retired by the Met on 1 October 2026 (it now answers 410);
@@ -720,7 +717,7 @@ const SEARCH_TIME_LIMIT_MS = 90000;   // a search stops after 90 s and keeps wha
 
 const settings = {
   models: FREE_MODELS.slice(),
-  name: "OpenRouter (free models)",
+  name: "Groq / OpenRouter (free tiers)",
   get model() {
     const saved = localStorage.getItem("cnpa:model:free");
     return saved && this.models.includes(saved) ? saved : this.models[0];
@@ -730,29 +727,17 @@ const settings = {
 // Ask the Worker which free models it offers, so the page and the Worker always agree
 let proxyInfo = null;
 async function loadProxyInfo() {
-  if (proxyInfo) return proxyInfo;
-  // 1. the Worker's live list of free vision models
-  if (PROXY_URL) {
-    try {
-      const j = await (await fetch(PROXY_URL)).json();
-      const free = (Array.isArray(j.models) ? j.models : []).filter(isFree);
-      if (free.length) { settings.models = free; proxyInfo = j; return proxyInfo; }
-    } catch {}
-  }
-  // 2. otherwise ask OpenRouter directly which free models accept images right now
+  if (proxyInfo || !PROXY_URL) return proxyInfo;
+  // the Worker reports which Groq / OpenRouter models it will use
   try {
-    const j = await (await fetch("https://openrouter.ai/api/v1/models")).json();
-    const live = (j.data || []).filter(m => /:free$/.test(m.id) &&
-      ((m.architecture?.input_modalities || []).includes("image") || /image/.test(m.architecture?.modality || ""))).map(m => m.id);
-    if (live.length) {
-      settings.models = [...FREE_MODELS.filter(id => live.includes(id)), ...live.filter(id => !FREE_MODELS.includes(id)), "openrouter/free"];
-      proxyInfo = { models: settings.models };
-    }
+    const j = await (await fetch(PROXY_URL)).json();
+    if (Array.isArray(j.models) && j.models.length) settings.models = j.models;
+    proxyInfo = j;
   } catch {}
   return proxyInfo;
 }
 
-const WORKER_VERSION_NEEDED = 8;
+const WORKER_VERSION_NEEDED = 10;
 const workerIsOld = () => proxyInfo && !(Number(proxyInfo.version) >= WORKER_VERSION_NEEDED);
 const needsKey = () => false;   // always connected through the Worker
 
@@ -1527,7 +1512,7 @@ async function callModel(messages, avoid = new Set(), part = "negation", rec = c
   if (!tapped.has(partKey(rec.id, part))) { const e = new Error("Tap \u201cUnsay this record\u201d to ask the model."); e.fatal = true; throw e; }
   const key = directKey();
   const pool = settings.models.filter(m => isFree(m));
-  const chosen = isFree(settings.model) && !avoid.has(settings.model) ? settings.model : (pool[0] || "openrouter/free");
+  const chosen = isFree(settings.model) && !avoid.has(settings.model) ? settings.model : (pool[0] || FREE_MODELS[0]);
   const chain = [chosen, ...pool.filter(m => m !== chosen)];
   let last = null, best = null;   // best: the fullest partial record seen, used if nothing complete arrives
   // the Worker does its own fallbacks; the direct route tries up to three groups of three free models
@@ -1590,9 +1575,9 @@ async function callModel(messages, avoid = new Set(), part = "negation", rec = c
   if (best) { lastModelUsed = best.model; return best.record; }
   const st = last ? last.status : 0, detail = last ? last.detail : "";
   const e = new Error(
-    st === 401 ? "The site\u2019s OpenRouter key was rejected. The site owner needs to check Openrouter_Key in the Worker." :
-    st === 429 ? (detail || "The free models are busy or today\u2019s free requests are used up. Try again later.") :
-    st === 404 ? (detail || "The free model isn\u2019t available on OpenRouter right now. Try again later.") :
+    st === 401 || st === 403 ? (detail || "A provider rejected the site\u2019s key. The site owner needs to check Groq_Key / Openrouter_Key in the Worker.") :
+    st === 429 ? (detail || "The free models are busy or today\u2019s free allowance is used up. Try again later.") :
+    st === 404 ? (detail || "The free model isn\u2019t available right now. Try again later.") :
     st === 422 ? "The model answered, but not in a form that could be read as a record. Unsay again." :
     (detail || `The free model answered with status ${st}.`));
   e.fatal = [401, 403, 404, 429].includes(st);
@@ -1749,7 +1734,7 @@ async function runPart(r, part, force) {
 function fillModelPanel() {
   $("model-input").innerHTML = settings.models.map(m =>
     `<option value="${esc(m)}"${m === settings.model ? " selected" : ""}>${esc(m === "openrouter/free" ? "Any free vision model (OpenRouter picks)" : m.replace(/:free$/, ""))}</option>`).join("");
-  $("key-note").innerHTML = "Only free OpenRouter models are used, so nothing is ever charged. They run through this site\u2019s secure connection; no key is needed. If the chosen model is busy, the next free one answers.";
+  $("key-note").innerHTML = "Open models on Groq\u2019s free tier, with OpenRouter\u2019s free models as backup, through this site\u2019s secure connection; no key is needed here.";
 }
 async function openKey() {
   $("key-panel").classList.add("open");
