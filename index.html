@@ -646,6 +646,88 @@
   /* text over the painting: a darker band and a soft shadow keep it legible on light areas */
   .image-overlay { background: linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.6) 30%, transparent 70%); }
   .image-overlay p { color: #f2f2f2; text-shadow: 0 1px 3px rgba(0,0,0,0.9); }
+
+  /* ───── Reading on iPad: larger type, comfortable line length, one scroll, big touch targets ───── */
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  body { font-size: 17px; line-height: 1.6; }
+
+  /* top of the page */
+  .topbar { font-size: 13px; padding-left: 28px; padding-right: 28px; }
+  .topbar-left { font-size: 15px; padding: 10px 0; min-height: 44px; display: inline-flex; align-items: center; }
+  .breadcrumb { font-size: 14px; padding: 18px 28px 0; line-height: 1.5; }
+  .breadcrumb .bc-link { display: inline-block; padding: 12px 0; }
+  .search-row { padding: 16px 28px 0; gap: 18px; }
+  .search-row input { font-size: 22px; padding: 10px 0; }
+  .search-row button { font-size: 14px; min-height: 44px; }
+  .scope-label { font-size: 14px; }
+  .scope-select { font-size: 16px; min-height: 44px; }
+  .search-status-line { padding: 12px 28px; }
+  .search-status { font-size: 16px; line-height: 1.5; }
+  .stop-btn { font-size: 13px; min-height: 44px; padding: 8px 16px; }
+  .results-strip { padding: 16px 28px 4px; gap: 10px; }
+  .thumb, .thumb img { height: 88px; }
+  .thumb { min-width: 66px; }
+  .thumb img { min-width: 66px; }
+
+  /* the record */
+  .main { padding: 28px; gap: 44px; }
+  .artwork-title { font-size: 34px; line-height: 1.25; margin-bottom: 10px; }
+  .artist-name { font-size: 17px; margin-bottom: 6px; }
+  .artist-nationality { font-size: 16px; }
+  .artwork-date { font-size: 18px; }
+  .curatorial-text { font-size: 18px; line-height: 1.7; max-width: 62ch; }
+  .image-caption { font-size: 14px; line-height: 1.55; }
+  .public-domain { font-size: 13px; }
+  .image-overlay p { font-size: 17px; line-height: 1.6; }
+
+  /* all three tabs always visible: they share the row, and wrap onto two lines only if they must */
+  .tabs { margin-bottom: 8px; display: flex; flex-wrap: wrap; overflow: visible; }
+  .tab-btn { font-size: 13.5px; letter-spacing: 0.04em; padding: 12px 11px; min-height: 48px; flex: 0 1 auto; white-space: nowrap; }
+  .tab-btn:first-child { padding-left: 0; }
+
+  .meta-row { padding: 12px 0; gap: 16px; }
+  .meta-label { font-size: 14px; min-width: 140px; }
+  .meta-value { font-size: 17px; line-height: 1.55; }
+  .neg-row { padding: 14px 0; gap: 16px; }
+  .neg-label { font-size: 14px; min-width: 140px; }
+  .neg-value { font-size: 18px; line-height: 1.65; }
+  .absence-heading { font-size: 13px; margin: 10px 0 20px; }
+  .absence-item { font-size: 18px; line-height: 1.75; margin-bottom: 20px; padding-left: 18px; max-width: 62ch; }
+
+  .gen-note { font-size: 17px; line-height: 1.7; max-width: 62ch; }
+  .gen-note button { font-size: 14px; min-height: 48px; padding: 0 2px; }
+  .gen-foot { font-size: 14px; line-height: 1.5; flex-wrap: wrap; }
+  .gen-foot button { font-size: 14px; min-height: 48px; }
+  .bottom-bar .credit-title { font-size: 13px; }
+  .bottom-bar .credit-line { font-size: 16px; }
+
+  /* one scroll for the whole page: the record panels grow with their text instead of scrolling inside a box */
+  .tab-panel, .tab-panel.active { max-height: none !important; min-height: 0 !important; overflow: visible !important; padding-right: 0; }
+
+  /* landscape iPad and wider: two columns, the painting stays in view while the text scrolls */
+  @media (min-width: 1000px) and (orientation: landscape), (min-width: 1200px) {
+    .image-col { position: sticky; top: 16px; align-self: flex-start; }
+    .image-wrap img { max-height: calc(100dvh - 200px); width: 100%; object-fit: contain; }
+    .details-col { max-width: 640px; }
+  }
+  /* portrait iPad: one column, image above, text at a comfortable reading width */
+  @media (max-width: 999px), (orientation: portrait) {
+    .main { flex-direction: column; align-items: center; }
+    .image-col, .details-col { max-width: 680px; width: 100%; flex-basis: auto; }
+    .image-wrap img { max-height: 52vh; width: auto; max-width: 100%; margin: 0 auto; }
+  }
+  /* narrow phones: labels above values */
+  @media (max-width: 600px) {
+    .meta-row, .neg-row { flex-direction: column; gap: 4px; }
+    .meta-label, .neg-label { min-width: 0; }
+    .artwork-title { font-size: 28px; }
+  }
+
+  /* credit link: same colour as the credit text, underlined, easy to tap */
+  .bottom-bar { pointer-events: auto; }
+  .credit-link { color: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px;
+                 display: inline-block; padding: 12px 2px; margin: -12px 0; }
+  .credit-link:hover, .credit-link:focus-visible { color: var(--fg); }
 </style>
 </head>
 <body>
@@ -740,9 +822,9 @@
 
   <!-- Bottom bar -->
   <div class="bottom-bar">
-    <span class="credit-title">THIS IS NOT AN ARCHIVE</span>
-    <span class="credit-line">Experiments in Slow Archiving</span>
-    <span class="credit-line">A Project by Giulia Taurino</span>
+    <span class="credit-title">CECI N’EST PAS UNE ARCHIVE</span>
+    <span class="credit-line">From the series “Experiments in Slow Archiving”</span>
+    <span class="credit-line">A project by <a class="credit-link" href="https://www.linkedin.com/in/giulia-taurino-ph-d-12811b33/en" target="_blank" rel="noopener">Giulia Taurino</a></span>
   </div>
 
 <script>
