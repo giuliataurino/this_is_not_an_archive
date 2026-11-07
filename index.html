@@ -728,14 +728,18 @@
   .credit-link { color: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px;
                  display: inline-block; padding: 12px 2px; margin: -12px 0; }
   .credit-link:hover, .credit-link:focus-visible { color: var(--fg); }
+
+  /* About link in the top bar */
+  .about-link { color: var(--fg-dim); text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; padding: 0 2px; }
+  .about-link:hover, .about-link:focus-visible { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }
 </style>
 </head>
 <body>
 
   <!-- Top bar -->
   <div class="topbar">
-    <a class="topbar-left" id="topbar-title" href="#" onclick="returnToStart(); return false;">The Met</a>
-    <span class="topbar-right"><span id="topbar-right"></span><button class="key-btn" id="key-btn" type="button" hidden>Model</button></span>
+    <a class="topbar-left" id="topbar-title" href="#" onclick="returnToStart(); return false;">An Archive</a>
+    <span class="topbar-right"><span id="topbar-right"></span><button class="key-btn" id="key-btn" type="button" hidden>Model</button><a class="about-link" href="about.html">About</a></span>
   </div>
 
   <!-- Model key panel -->
@@ -747,7 +751,7 @@
 
   <!-- Breadcrumb -->
   <div class="breadcrumb">
-    <a id="bc-collection" class="bc-link" href="#" onclick="returnToStart(); return false;" title="Back to the opening page">The Met Collection</a>
+    <a id="bc-collection" class="bc-link" href="https://www.metmuseum.org/art/collection" target="_blank" rel="noopener" title="Open The Met Collection in a new tab">The Met Collection</a>
     <span class="sep">›</span>
     <a id="bc-search" class="bc-link" href="#" onclick="goToSearch(); return false;" title="Back to the search">Search Art</a>
     <span class="sep">›</span>
@@ -1125,7 +1129,7 @@ function switchTab(tabId) {
   if (tabId === "negation") reAnimateChildren($("panel-negation"), ".neg-row");
   if (tabId === "absence") reAnimateChildren($("panel-absence"), ".absence-item");
 
-  $("topbar-title").textContent = isApophatic ? "This Is Not an Archive" : "The Met";
+  $("topbar-title").textContent = isApophatic ? "This Is Not an Archive" : "An Archive";
   $("topbar-right").textContent = isApophatic ? "Shadow Collection" : "";
   $("topbar-right").style.display = isApophatic ? "" : "none";
   $("key-btn").hidden = true;   // one model, chosen in the Worker: nothing to pick here
