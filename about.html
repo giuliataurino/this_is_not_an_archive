@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>About · This Is Not an Archive</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --fg-secondary: #444;
+    --fg-dim: #4a4a4a;
+    --border: #e0e0e0;
+    --border-light: #eee;
+    --serif: 'EB Garamond', 'Georgia', 'Times New Roman', serif;
+    --sans: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  }
+
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  body {
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.6;
+    background: var(--bg);
+    color: var(--fg);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Top bar (as on the main page) */
+  .topbar {
+    border-bottom: 1px solid var(--border);
+    padding: max(10px, env(safe-area-inset-top)) 28px 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-family: var(--sans);
+  }
+  .topbar-left {
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: 0.15em;
+    color: var(--fg);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .topbar-right a {
+    color: var(--fg);
+    font-weight: 600;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  /* Breadcrumb */
+  .breadcrumb {
+    padding: 18px 28px 0;
+    font-size: 14px;
+    font-family: var(--sans);
+    color: var(--fg-dim);
+  }
+  .breadcrumb a {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+    display: inline-block;
+    padding: 12px 0;
+  }
+  .breadcrumb a:hover, .breadcrumb a:focus-visible { color: var(--fg); }
+  .breadcrumb .sep { margin: 0 8px; }
+  .breadcrumb .current { color: var(--fg); }
+
+  /* About text */
+  .about { flex: 1; padding: 28px 28px 0; }
+  .about-inner { max-width: 680px; margin: 0 auto; }
+  .about h1 {
+    font-weight: 400;
+    font-size: 34px;
+    line-height: 1.25;
+    margin: 0 0 24px;
+  }
+  .about p {
+    font-size: 18px;
+    line-height: 1.7;
+    color: var(--fg-secondary);
+    margin: 0 0 1.1em;
+    -webkit-hyphens: auto;
+    hyphens: auto;
+  }
+  .about p.citation {
+    margin: 32px 0 0;
+    padding: 18px 0 0 2em;
+    text-indent: -2em;               /* hanging indent, as in a reference list */
+    border-top: 1px solid var(--border-light);
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--fg-dim);
+    -webkit-hyphens: manual;
+    hyphens: manual;
+  }
+  .about .citation cite { font-style: italic; }
+
+  /* Credit (as on the main page) */
+  .bottom-bar {
+    margin-top: 48px;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 28px 24px calc(14px + env(safe-area-inset-bottom));
+    font-family: var(--sans);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--fg-dim);
+    line-height: 1.4;
+    text-align: center;
+  }
+  .bottom-bar .credit-title { font-weight: 600; font-size: 13px; letter-spacing: 0.15em; color: var(--fg); }
+  .bottom-bar .credit-line { font-family: var(--serif); font-size: 16px; letter-spacing: 0; }
+  .credit-link { color: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px;
+                 display: inline-block; padding: 12px 2px; margin: -12px 0; }
+  .credit-link:hover, .credit-link:focus-visible { color: var(--fg); }
+
+  @media (max-width: 600px) {
+    .about h1 { font-size: 28px; }
+    .about p { font-size: 17px; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <a class="topbar-left" href="index.html">An Archive</a>
+    <span class="topbar-right"><a href="about.html" aria-current="page">About</a></span>
+  </div>
+
+  <div class="breadcrumb">
+    <a href="index.html">Back to Moonlight, Strandgade 30</a>
+    <span class="sep">›</span>
+    <span class="current">About</span>
+  </div>
+
+  <main class="about">
+    <div class="about-inner">
+      <h1>About</h1>
+      <p>In 1929, René Magritte inscribed below a painted pipe the words <i lang="fr">Ceci n’est pas une pipe</i>, severing the assumed unity between representation and referent. Nearly a century later, the archive faces a parallel crisis of meaning, images often rescinded from their metadata in AI unarchival practices. <i>Ceci N’est Pas Une Archive</i> is a computational art project that applies apophatic logic to archival metadata, generating structured fields of negation about what a visual record is not, what it does not depict, whom it does not concern. The project is designed as a means of surfacing the ineffable residues that slip through the positivist grid of archival cataloguing in digital repositories.</p>
+      <p>Metadata schemata and histories are built upon continuous editorial acts of radical selection: to assign a date, creator, medium, and subject to a digital replica is simultaneously to foreclose the innumerable dimensions of meaning that remain untagged. Drawing on André Magritte’s “treachery of images” and the broader surrealist involvement in the constructive betrayal of signs—as it appears in Georges Bataille’s concept of <i lang="fr">informe</i>, formless, resembling nothing, and Leonora Carrington’s deliberate surrendering of traditional narratives to magical realism—, <i>Ceci N’est Pas Une Archive</i> builds a computational system that authors negative metadata: structured descriptive records composed entirely of negations, exposed lacunae, and apophatic gestures. This inverse documentation might include linguistic and logical negations—“not a memory”, “not a sound,”— somewhat mechanically repeating a grammatical formula. Or else, it might generate entirely new sentences and chains of thoughts, each actively performing a different kind of absence through language. In the latter case, the act of unsaying feels compositional and conceptual.</p>
+      <p>The project employs VLMs prompted through constrained instructions that forbid assertion, encourage counterfactual reasoning, and require the system to generate outputs around and away from the object. The resulting negative metadata is embedded back into a navigable, searchable interface that mimics the archive’s promise of retrieval while opening a contemplative counter-archival space. Users search and find not information but its inverse: an expanding descriptive space of the meaning the record doesn’t hold. The work thus stages a double negation: denying the archive’s claim to preservation, while, through that very denial, evoking the undocumentable richness of cultural experience and discourse around archival objects. By doing so, I confront algorithmic flattening by turning computational tools against their own positivist assumptions, making the machine an instrument of unknowing rather than knowing, and watching digital collections unbecome. Through this project I posit archival negation not as absence but a <i lang="la">via negativa</i> toward deeper encounters, what William Franke (2014) describes as discourse that “unsays” itself in order to gesture beyond language’s own limits. Finally, this work positions surrealism not merely as an art-historical reference but as a methodological resource: Magritte’s negation does not destroy meaning by undoing the relation between text and image, but rather suspends it, inviting us to hesitate in a liminal space without resolution and stay with the trouble (Haraway 2016). Echoing Donna Haraway’s vision of “becoming with each other or not at all”, with this project I argue for a practice of archival description the helps establish oddkins between visual records, their naming and unnaming practices, observing digital images as always “situated, entangled and worldly, this and not that.” (Haraway 2021)</p>
+      <p><i>Ceci N’est Pas Une Archive</i> ultimately asks what it would mean to build systems of cultural memory rooted on the acknowledgment of all that metadata cannot carry, an archive of what the archive is not.</p>
+      <p class="citation">Taurino, G. (forthcoming) <cite>Ceci N’est Pas Une Archive: Negative Metadata and the Apophasis of Digital Records</cite>.</p>
+    </div>
+  </main>
+
+  <div class="bottom-bar">
+    <span class="credit-title">CECI N’EST PAS UNE ARCHIVE</span>
+    <span class="credit-line">Experiments in Slow Archiving</span>
+    <span class="credit-line">A project by <a class="credit-link" href="https://www.linkedin.com/in/giulia-taurino-ph-d-12811b33/en" target="_blank" rel="noopener">Giulia Taurino</a></span>
+  </div>
+
+</body>
+</html>
